@@ -1,5 +1,8 @@
 /target
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock # disabled for nix build to read dependencies
 *.log
 *.pid
+
+# nix build outputs
+/result
