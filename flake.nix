@@ -25,9 +25,7 @@
           cargo = pkgs.rust-bin.beta.latest.default;
           rustc = pkgs.rust-bin.beta.latest.default;
         };
-      in
-      {
-        packages.default = rustPlatform.buildRustPackage {
+        piri = rustPlatform.buildRustPackage {
           pname = "piri";
           version = "0.1.5";
           src = ./.;
@@ -36,9 +34,22 @@
             pkg-config
           ];
         };
+      in
+      {
+        packages.default = piri;
 
-        nixosModules.default = import ./nix/module.nix;
-        homeManagerModules.default = import ./nix/home-manager.nix;
+        nixosModules.default =
+          { pkgs, ... }:
+          {
+            imports = [ ./nix/module.nix ];
+            config.programs.piri.package = pkgs.lib.mkDefault piri;
+          };
+        homeManagerModules.default =
+          { pkgs, ... }:
+          {
+            imports = [ ./nix/home-manager.nix ];
+            config.programs.piri.package = pkgs.lib.mkDefault piri;
+          };
       }
     );
 }
