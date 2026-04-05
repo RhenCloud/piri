@@ -38,6 +38,7 @@
         };
 
         nixosModules.default = import ./nix/module.nix;
+        homeManagerModules.default = import ./nix/home-manager.nix;
       }
     );
 }
