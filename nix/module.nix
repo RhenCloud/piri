@@ -64,7 +64,7 @@ in
       source <(${cfg.package}/bin/piri completion zsh)
     '';
 
-    programs.fish.interactiveShellInit = mkIf cfg.enableFishIntegration ''
+    programs.fish.shellInit = mkIf cfg.enableFishIntegration ''
       ${cfg.package}/bin/piri completion fish | source
     '';
   };
