@@ -234,15 +234,14 @@ async fn async_main() -> Result<()> {
             )?;
         }
         Commands::Completion { shell } => {
-            let mut cmd = Cli::command();
+            let mut cmd = <Cli as CommandFactory>::command();
+            let mut stdout = io::stdout();
             match shell {
-                Shell::Bash => generate(shells::Bash, &mut cmd, "piri", &mut io::stdout()),
-                Shell::Zsh => generate(shells::Zsh, &mut cmd, "piri", &mut io::stdout()),
-                Shell::Fish => generate(shells::Fish, &mut cmd, "piri", &mut io::stdout()),
-                Shell::PowerShell => {
-                    generate(shells::PowerShell, &mut cmd, "piri", &mut io::stdout())
-                }
-                Shell::Elvish => generate(shells::Elvish, &mut cmd, "piri", &mut io::stdout()),
+                Shell::Bash => generate(shells::Bash, &mut cmd, "piri", &mut stdout),
+                Shell::Zsh => generate(shells::Zsh, &mut cmd, "piri", &mut stdout),
+                Shell::Fish => generate(shells::Fish, &mut cmd, "piri", &mut stdout),
+                Shell::PowerShell => generate(shells::PowerShell, &mut cmd, "piri", &mut stdout),
+                Shell::Elvish => generate(shells::Elvish, &mut cmd, "piri", &mut stdout),
             }
         }
     }
