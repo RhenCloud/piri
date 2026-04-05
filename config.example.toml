@@ -17,6 +17,7 @@ singleton = true
 window_order = true
 swallow = true
 workspace_rule = true
+fcitx5 = true
 
 [piri.scratchpad]
 default_size = "40% 60%"
@@ -178,3 +179,33 @@ auto_width = ["100%", "50%", ["30%", "35%", "35%"]]
 # Example: workspace with auto_maximize enabled
 [workspace_rule.main]
 auto_maximize = true
+
+# Fcitx5 plugin: automatically switch input mode based on window focus
+# Format: [[fcitx5]]
+# - app_id: regex pattern to match window app_id (optional, but at least one of app_id or title must be specified)
+# - title: regex pattern to match window title (optional, but at least one of app_id or title must be specified)
+# - input_mode: input mode to switch to ("english" or "chinese")
+# Note:
+#   - If both app_id and title are specified, the rule matches if EITHER matches (OR logic)
+#   - At least one of app_id or title must be specified
+#   - Matching order: first matching rule is applied
+# Example: switch to English mode for browser windows
+[[fcitx5]]
+app_id = ".*firefox.*"
+input_mode = "english"
+
+# Example: switch to Chinese mode for terminal windows
+[[fcitx5]]
+app_id = ".*ghostty.*"
+input_mode = "chinese"
+
+# Example: switch to English mode for windows with specific title
+[[fcitx5]]
+title = ".*Chrome.*"
+input_mode = "english"
+
+# Example: match by either app_id OR title
+[[fcitx5]]
+app_id = "code"
+title = ".*VS Code.*"
+input_mode = "english"

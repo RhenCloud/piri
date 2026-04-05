@@ -1,4 +1,5 @@
 pub mod empty;
+pub mod fcitx5;
 pub mod scratchpads;
 pub mod singleton;
 pub mod swallow;
@@ -141,6 +142,7 @@ register_plugins! {
     "window_order" => WindowOrder(window_order::WindowOrderPlugin),
     "swallow"      => Swallow(swallow::SwallowPlugin),
     "workspace_rule" => WorkspaceRule(workspace_rule::WorkspaceRulePlugin),
+    "fcitx5"       => Fcitx5(fcitx5::Fcitx5Plugin),
 }
 
 pub struct PluginManager {
