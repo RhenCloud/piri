@@ -12,6 +12,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, info, warn};
 use niri_ipc::Event;
+use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
@@ -142,7 +143,7 @@ register_plugins! {
     "window_order" => WindowOrder(window_order::WindowOrderPlugin),
     "swallow"      => Swallow(swallow::SwallowPlugin),
     "workspace_rule" => WorkspaceRule(workspace_rule::WorkspaceRulePlugin),
-    "fcitx5"       => Fcitx5(fcitx5::Fcitx5Plugin),
+    "fcitx5" => Fcitx5(fcitx5::Fcitx5Plugin),
 }
 
 pub struct PluginManager {
@@ -185,16 +186,14 @@ impl PluginManager {
 
         // Outer loop: reconnect on connection failure
         loop {
-            let socket = match niri.create_event_stream_socket() {
-                Ok(s) => s,
+            let mut reader = match niri.open_event_stream_async().await {
+                Ok(reader) => reader,
                 Err(e) => {
                     warn!("Failed to create event stream: {}, retrying in 1s", e);
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                     continue;
                 }
             };
-
-            let mut read_event = socket.read_events();
             info!("Event stream connected, waiting for events...");
 
             // Send notification on first successful connection
@@ -206,7 +205,43 @@ impl PluginManager {
                 is_first_connection = false;
             }
 
-            while let Ok(event) = read_event() {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                let n = match reader.read_line(&mut line).await {
+                    Ok(n) => n,
+                    Err(e) => {
+                        warn!("Failed reading event stream: {}", e);
+                        break;
+                    }
+                };
+
+                if n == 0 {
+                    warn!("Event stream reached EOF");
+                    break;
+                }
+
+                let payload = line.trim();
+                if payload.is_empty() {
+                    // Ignore empty heartbeat/blank lines instead of reconnecting.
+                    continue;
+                }
+
+                let event: Event = match serde_json::from_str(payload) {
+                    Ok(event) => event,
+                    Err(e) => {
+                        if e.to_string().contains("unknown variant") {
+                            debug!(
+                                "Ignoring unsupported event payload: {} | payload={}",
+                                e, payload
+                            );
+                        } else {
+                            warn!("Failed to parse event payload: {} | payload={}", e, payload);
+                        }
+                        continue;
+                    }
+                };
+
                 debug!("Raw event received: {:?}", event);
 
                 // Send event to channel for distribution
@@ -280,7 +315,7 @@ impl PluginManager {
         for plugin in &mut self.plugins {
             match plugin.handle_ipc_request(request).await? {
                 Some(result) => return Ok(Some(result)),
-                None => continue,
+                Option::None => continue,
             }
         }
         Ok(None)

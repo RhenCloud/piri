@@ -6,6 +6,8 @@ use niri_ipc::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
 
 use crate::utils::send_notification;
 
@@ -17,7 +19,7 @@ pub struct NiriIpc {
 
 struct NiriIpcInner {
     socket_path: Mutex<Option<PathBuf>>,
-    socket: Mutex<Option<Socket>>,
+    socket: tokio::sync::Mutex<Option<Socket>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +87,7 @@ impl NiriIpc {
         Self {
             inner: Arc::new(NiriIpcInner {
                 socket_path: Mutex::new(path),
-                socket: Mutex::new(None),
+                socket: tokio::sync::Mutex::new(None),
             }),
         }
     }
@@ -101,7 +103,7 @@ impl NiriIpc {
                 new_path
             );
             *path_guard = new_path;
-            if let Ok(mut socket_guard) = self.inner.socket.lock() {
+            if let Ok(mut socket_guard) = self.inner.socket.try_lock() {
                 *socket_guard = None;
             }
         }
@@ -122,32 +124,28 @@ impl NiriIpc {
     /// Helper to send a request and get a response
     pub async fn send_request(&self, request: Request) -> Result<Response> {
         let niri = self.clone();
-        tokio::task::spawn_blocking(move || -> Result<Response> {
-            let mut guard =
-                niri.inner.socket.lock().map_err(|_| anyhow::anyhow!("Mutex poisoned"))?;
-            if guard.is_none() {
+        let mut guard = niri.inner.socket.lock().await;
+
+        if guard.is_none() {
+            *guard = Some(niri.connect_internal()?);
+        }
+
+        let socket = guard.as_mut().unwrap();
+        let request_clone = request.clone();
+
+        match socket.send(request) {
+            Ok(Reply::Ok(response)) => Ok(response),
+            Ok(Reply::Err(err)) => anyhow::bail!("niri-ipc error: {}", err),
+            Err(_) => {
+                // Try to reconnect once if send fails
                 *guard = Some(niri.connect_internal()?);
-            }
-            let socket = guard.as_mut().unwrap();
-
-            let request_clone = request.clone();
-
-            match socket.send(request) {
-                Ok(Reply::Ok(response)) => Ok(response),
-                Ok(Reply::Err(err)) => anyhow::bail!("niri-ipc error: {}", err),
-                Err(_) => {
-                    // Try to reconnect once if send fails
-                    *guard = Some(niri.connect_internal()?);
-                    let socket = guard.as_mut().unwrap();
-                    match socket.send(request_clone)? {
-                        Reply::Ok(response) => Ok(response),
-                        Reply::Err(err) => anyhow::bail!("niri-ipc error: {}", err),
-                    }
+                let socket = guard.as_mut().unwrap();
+                match socket.send(request_clone)? {
+                    Reply::Ok(response) => Ok(response),
+                    Reply::Err(err) => anyhow::bail!("niri-ipc error: {}", err),
                 }
             }
-        })
-        .await
-        .context("Task join error")?
+        }
     }
 
     /// Helper to send an action and expect Ok
@@ -164,31 +162,26 @@ impl NiriIpc {
         T: Send + 'static,
     {
         let niri = self.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut guard =
-                niri.inner.socket.lock().map_err(|_| anyhow::anyhow!("Mutex poisoned"))?;
+        let mut guard = niri.inner.socket.lock().await;
 
-            // Ensure we have a connection
-            if guard.is_none() {
-                *guard = Some(niri.connect_internal()?);
-            }
+        // Ensure we have a connection
+        if guard.is_none() {
+            *guard = Some(niri.connect_internal()?);
+        }
 
-            let res = {
-                let socket = guard.as_mut().unwrap();
-                f(socket)
-            };
+        let res = {
+            let socket = guard.as_mut().unwrap();
+            f(socket)
+        };
 
-            if res.is_ok() {
-                res
-            } else {
-                // On error, try to reconnect once and retry the whole batch
-                *guard = Some(niri.connect_internal()?);
-                let socket = guard.as_mut().unwrap();
-                f(socket)
-            }
-        })
-        .await
-        .context("Task join error")?
+        if res.is_ok() {
+            res
+        } else {
+            // On error, try to reconnect once and retry the whole batch
+            *guard = Some(niri.connect_internal()?);
+            let socket = guard.as_mut().unwrap();
+            f(socket)
+        }
     }
 
     /// Get all windows
@@ -293,7 +286,7 @@ impl NiriIpc {
                     }),
                 })
             }
-            Response::FocusedOutput(None) => anyhow::bail!("No focused output found"),
+            Response::FocusedOutput(Option::None) => anyhow::bail!("No focused output found"),
             _ => anyhow::bail!("Unexpected response type for FocusedOutput request"),
         }
     }
@@ -347,7 +340,7 @@ impl NiriIpc {
                 log::debug!("Focused window ID: {}", window.id);
                 Ok(Some(window.id))
             }
-            Response::FocusedWindow(None) => {
+            Response::FocusedWindow(Option::None) => {
                 log::debug!("No focused window found");
                 Ok(None)
             }
@@ -529,19 +522,53 @@ impl NiriIpc {
         self.get_window_position(window_id).await
     }
 
-    /// Create an event stream socket for listening to niri events
-    /// This returns a socket that has already requested the event stream
-    pub fn create_event_stream_socket(&self) -> Result<Socket> {
-        let mut socket = self.connect_internal()?;
+    /// Open an async event stream reader for niri events.
+    ///
+    /// Unlike `socket::Socket::read_events()`, this keeps parsing control in our code
+    /// so we can handle empty lines and malformed payloads without forcing reconnects.
+    pub async fn open_event_stream_async(&self) -> Result<BufReader<UnixStream>> {
+        let path_opt = self
+            .inner
+            .socket_path
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Mutex poisoned"))?
+            .clone();
 
-        // Request event stream
-        match socket.send(Request::EventStream)? {
-            Reply::Ok(_) => {}
-            Reply::Err(err) => {
-                anyhow::bail!("Failed to request event stream: {}", err);
-            }
+        let path = if let Some(path) = path_opt {
+            path
+        } else {
+            std::env::var_os(niri_ipc::socket::SOCKET_PATH_ENV)
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{} is not set, are you running this within niri?",
+                        niri_ipc::socket::SOCKET_PATH_ENV
+                    )
+                })?
+        };
+
+        let mut stream = UnixStream::connect(&path)
+            .await
+            .with_context(|| format!("Failed to connect to niri socket: {}", path.display()))?;
+
+        let mut req = serde_json::to_string(&Request::EventStream)?;
+        req.push('\n');
+        stream.write_all(req.as_bytes()).await?;
+
+        let mut reader = BufReader::new(stream);
+        let mut reply_line = String::new();
+        let n = reader.read_line(&mut reply_line).await?;
+        if n == 0 {
+            anyhow::bail!("niri closed socket before replying to EventStream request");
         }
 
-        Ok(socket)
+        let reply: Reply = serde_json::from_str(reply_line.trim())
+            .context("Failed to parse EventStream handshake reply")?;
+
+        match reply {
+            Reply::Ok(Response::Handled) => Ok(reader),
+            Reply::Ok(other) => anyhow::bail!("Unexpected EventStream reply: {:?}", other),
+            Reply::Err(err) => anyhow::bail!("Failed to request event stream: {}", err),
+        }
     }
 }
