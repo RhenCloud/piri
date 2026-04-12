@@ -23,4 +23,7 @@ niri-ipc = "25.11"
 async-trait = "0.1"
 regex = "1.10"
 futures = "0.3"
-
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }

@@ -18,6 +18,7 @@ window_order = true
 swallow = true
 workspace_rule = true
 fcitx5 = true
+sleepy = false
 
 [piri.scratchpad]
 default_size = "40% 60%"
@@ -56,7 +57,7 @@ command = "imv"
 app_id = "imv"
 size = "60% 80%"
 margin = 50
-swallow_to_focus = true  # Optional: swallow into focused window when shown
+swallow_to_focus = true # Optional: swallow into focused window when shown
 
 
 # Window rules: automatically move windows to workspaces based on app_id or title
@@ -133,18 +134,18 @@ code = 80
 ghostty = 70
 
 [piri.swallow]
-use_pid_matching=false
+use_pid_matching = false
 
 [piri.swallow.exclude]
 app_id = ".*mpv*."
 
 [[swallow]]
-child_app_id='.*google-chrome.*'
-parent_app_id='.*ghostty.*'
+child_app_id = '.*google-chrome.*'
+parent_app_id = '.*ghostty.*'
 
 [[swallow]]
-child_app_id='.*firefox*.'
-parent_app_id='.*ghostty.*'
+child_app_id = '.*firefox*.'
+parent_app_id = '.*ghostty.*'
 
 # Workspace rule: automatically adjust window widths based on window count
 # Format: [workspace_rule.{workspace}]
@@ -209,3 +210,16 @@ input_mode = "english"
 app_id = "code"
 title = ".*VS Code.*"
 input_mode = "english"
+
+# Sleepy plugin: push focused app/window info to Sleepy server
+# Requires sleepy server endpoint and device metadata
+[sleepy]
+server_url = "https://sleepy.example.com"
+device_id = "my-linux"
+device_name = "Niri Desktop"
+# Optional: bearer token (recommended if your server uses token auth)
+token = ""
+# Optional: secret field for deployments requiring secret in payload
+secret = ""
+# If true, use app_id as status text first; otherwise use window title
+prefer_app_id = false

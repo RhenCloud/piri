@@ -15,6 +15,7 @@ Piri 是基于 Rust 的 [Niri](https://github.com/YaLTeR/niri) 高性能功能�
 - 🔒 **Singleton**: 单实例保障。确保特定应用全局唯一，支持快速聚焦现有实例或自动拉起新进程（详见 [Singleton 文档](docs/zh/plugins/singleton.md)）
 - 📋 **Window Order**: 智能窗口排序。根据配置权重自动重排平铺窗口，相同权重窗口保持相对位置以最小化移动损耗（详见 [Window Order 文档](docs/zh/plugins/window_order.md)）
 - 🍽️ **Swallow**: 窗口吞噬机制。当子窗口打开时自动隐藏父窗口，让子窗口在布局中替换父窗口的位置（详见 [Swallow 文档](docs/zh/plugins/swallow.md)）
+- 😴 **Sleepy**: 在线状态同步。窗口焦点变化时自动上报当前应用状态到 Sleepy 服务端（详见 [Sleepy 文档](docs/zh/plugins/sleepy.md)）
 
 ## 窗口匹配机制
 

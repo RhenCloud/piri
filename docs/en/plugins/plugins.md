@@ -41,6 +41,15 @@ Automatically aligns the last column of windows to the rightmost position when w
 - Focus preservation - maintains user's focused window
 - Workspace-aware operation
 
+### [Sleepy Plugin](sleepy.md)
+
+Reports focused app status to a Sleepy server on focus changes, useful for online presence and device status sync.
+
+**Key Features**:
+- Event-driven reporting (triggered by focus changes)
+- Supports both Bearer token and secret-based auth flows
+- Built-in status deduplication to avoid redundant requests
+
 ## Plugin Control
 
 You can control which plugins are enabled or disabled in the configuration file:

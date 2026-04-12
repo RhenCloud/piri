@@ -82,6 +82,8 @@ pub struct Config {
     pub workspace_rule: HashMap<String, WorkspaceRuleConfig>,
     #[serde(default)]
     pub fcitx5: Vec<crate::plugins::fcitx5::Fcitx5WindowRule>,
+    #[serde(default)]
+    pub sleepy: Option<crate::plugins::sleepy::SleepyConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +188,8 @@ pub struct PluginsConfig {
     pub workspace_rule: Option<bool>,
     #[serde(default)]
     pub fcitx5: Option<bool>,
+    #[serde(default)]
+    pub sleepy: Option<bool>,
     #[serde(rename = "empty_config", default)]
     pub empty_config: Option<EmptyPluginConfig>,
 }
@@ -202,6 +206,7 @@ impl Default for PluginsConfig {
             swallow: None,
             workspace_rule: None,
             fcitx5: None,
+            sleepy: None,
             empty_config: None,
         }
     }
@@ -385,6 +390,7 @@ impl PluginsConfig {
             "swallow" => self.swallow.unwrap_or(false),
             "workspace_rule" => self.workspace_rule.unwrap_or(false),
             "fcitx5" => self.fcitx5.unwrap_or(false),
+            "sleepy" => self.sleepy.unwrap_or(false),
             _ => false,
         }
     }
@@ -496,6 +502,7 @@ impl Default for Config {
             swallow: Vec::new(),
             workspace_rule: HashMap::new(),
             fcitx5: Vec::new(),
+            sleepy: None,
         }
     }
 }

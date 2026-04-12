@@ -15,6 +15,7 @@ Piri is a high-performance [Niri](https://github.com/YaLTeR/niri) extension tool
 - 🔒 **Singleton**: Single-instance assurance. Ensures specific applications remain globally unique, supporting quick focus or automatic process launching (see [Singleton Docs](docs/en/plugins/singleton.md))
 - 📋 **Window Order**: Intelligent reordering. Automatically reorders tiled windows based on configured weights, preserving relative positions for identical weights to minimize movement (see [Window Order Docs](docs/en/plugins/window_order.md))
 - 🍽️ **Swallow**: Window swallowing mechanism. Automatically hides parent windows when child windows are opened, allowing child windows to replace parent windows in the layout (see [Swallow Docs](docs/en/plugins/swallow.md))
+- 😴 **Sleepy**: Presence sync. Automatically reports focused app status to your Sleepy server when focus changes (see [Sleepy Docs](docs/en/plugins/sleepy.md))
 
 
 ## Quick Start

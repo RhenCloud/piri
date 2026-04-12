@@ -2,6 +2,7 @@ pub mod empty;
 pub mod fcitx5;
 pub mod scratchpads;
 pub mod singleton;
+pub mod sleepy;
 pub mod swallow;
 pub mod window_order;
 pub mod window_rule;
@@ -144,6 +145,7 @@ register_plugins! {
     "swallow"      => Swallow(swallow::SwallowPlugin),
     "workspace_rule" => WorkspaceRule(workspace_rule::WorkspaceRulePlugin),
     "fcitx5" => Fcitx5(fcitx5::Fcitx5Plugin),
+    "sleepy" => Sleepy(sleepy::SleepyPlugin),
 }
 
 pub struct PluginManager {
