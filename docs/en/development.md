@@ -14,12 +14,12 @@
    use crate::ipc::IpcRequest;
    use niri_ipc::Event;
    use anyhow::Result;
-   
+
    pub struct MyPlugin {
        niri: NiriIpc,
        // Plugin state
    }
-   
+
    impl MyPlugin {
        pub fn new() -> Self {
            Self {
@@ -27,24 +27,24 @@
            }
        }
    }
-   
+
    #[async_trait]
    impl Plugin for MyPlugin {
        fn name(&self) -> &str { "myplugin" }
-       
+
        async fn init(&mut self, niri: NiriIpc, config: &Config) -> Result<()> {
            self.niri = niri;
            // Initialize plugin, read configuration, etc.
            Ok(())
        }
-       
+
        // Handle IPC requests (optional, if plugin needs to respond to client commands)
        async fn handle_ipc_request(&mut self, request: &IpcRequest) -> Result<Option<Result<()>>> {
            // If request is handled, return Some(Ok(()))
            // If not handled, return Ok(None)
            Ok(None)
        }
-       
+
        // Handle niri events (optional, only for event-driven plugins)
        async fn handle_event(&mut self, event: &Event, niri: &NiriIpc) -> Result<()> {
            match event {
@@ -57,12 +57,12 @@
            }
            Ok(())
        }
-       
+
        // Declare which event types the plugin is interested in (for event filtering)
        fn is_interested_in_event(&self, event: &Event) -> bool {
            matches!(event, Event::WindowOpenedOrChanged { .. })
        }
-       
+
        // Update configuration (optional, supports hot reload)
        async fn update_config(&mut self, niri: NiriIpc, config: &Config) -> Result<()> {
            // Update plugin configuration
@@ -141,4 +141,3 @@ cargo fmt -- --check
 - `anyhow`: Error handling
 - `log` / `env_logger`: Logging system
 - `niri-ipc`: Niri IPC client library
-

@@ -1,8 +1,13 @@
+pub mod edge_pulse_renderer;
 pub mod empty;
+pub mod events;
 pub mod fcitx5;
+pub mod mark;
+pub mod render;
 pub mod scratchpads;
 pub mod singleton;
 pub mod sleepy;
+pub mod sticky;
 pub mod swallow;
 pub mod window_order;
 pub mod window_rule;
@@ -12,15 +17,34 @@ pub mod workspace_rule;
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, info, warn};
-use niri_ipc::Event;
-use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
+
+pub use events::PiriEvent;
 
 use crate::config::Config;
 use crate::ipc::IpcRequest;
 use crate::niri::NiriIpc;
 use crate::utils::send_notification;
+
+const DISPLAY_PREFIXES: &[(&str, &str)] = &[
+    ("HDMI-A", "HDMI"),
+    ("DVI-D", "DVI-D"),
+    ("DVI-I", "DVI-I"),
+    ("Virtual", "Virtual"),
+    ("Unknown", "Unknown"),
+    ("USB", "USB"),
+    ("eDP", "eDP"),
+    ("VGA", "VGA"),
+    ("DP", "DP"),
+];
+
+fn extract_display_prefix(output: &str) -> Option<&str> {
+    DISPLAY_PREFIXES
+        .iter()
+        .find(|(prefix, _)| output.starts_with(prefix))
+        .map(|(_, canonical)| *canonical)
+}
 
 /// Plugin trait that all plugins must implement
 #[async_trait]
@@ -36,25 +60,92 @@ pub trait Plugin: Send + Sync {
         Ok(None)
     }
 
-    async fn handle_event(&mut self, _event: &Event, _niri: &NiriIpc) -> Result<()> {
+    async fn handle_event(&mut self, _event: &PiriEvent, _niri: &NiriIpc) -> Result<()> {
         Ok(())
     }
 
-    /// Check if plugin is interested in a specific event type
-    /// This is used by PluginManager for event filtering to avoid calling plugins that don't care about the event.
+    /// Check if plugin is interested in a specific event type.
     /// Only events that pass this filter will be passed to handle_event().
-    ///
-    /// Note: Plugins should NOT duplicate event type checking in handle_event() - if an event
-    /// reaches handle_event(), it has already been filtered by is_interested_in_event().
-    ///
-    /// Default implementation returns true (receive all events for backward compatibility)
-    fn is_interested_in_event(&self, _event: &Event) -> bool {
+    fn is_interested_in_event(&self, _event: &PiriEvent) -> bool {
         false
     }
 
     async fn update_config(&mut self, _config: Self::Config) -> Result<()> {
         Ok(())
     }
+}
+
+/// Resolve a workspace config key with monitor-aware lookup.
+///
+/// Resolution order (first match wins):
+/// 1. `"{idx}@{output}"`     — e.g., "1@DP-2" (exact output, most specific)
+/// 2. `"{name}@{output}"`    — e.g., "browser@DP-2"
+/// 3. `"{idx}@{prefix}"`     — e.g., "1@DP" (display prefix match)
+/// 4. `"{name}@{prefix}"`    — e.g., "browser@DP"
+/// 5. `"{name}"`             — e.g., "browser" (by name only)
+/// 6. `"{idx}"`              — e.g., "1" (fallback, backward compatible)
+pub fn resolve_workspace_config<'a, T>(
+    map: &'a std::collections::HashMap<String, T>,
+    idx: u8,
+    name: Option<&str>,
+    output: Option<&str>,
+) -> Option<&'a T> {
+    if let Some(out) = output {
+        let key = format!("{}@{}", idx, out);
+        if let Some(v) = map.get(&key) {
+            return Some(v);
+        }
+        if let Some(n) = name {
+            let key = format!("{}@{}", n, out);
+            if let Some(v) = map.get(&key) {
+                return Some(v);
+            }
+        }
+        if let Some(pf) = extract_display_prefix(out) {
+            let key = format!("{}@{}", idx, pf);
+            if let Some(v) = map.get(&key) {
+                return Some(v);
+            }
+            if let Some(n) = name {
+                let key = format!("{}@{}", n, pf);
+                if let Some(v) = map.get(&key) {
+                    return Some(v);
+                }
+            }
+        }
+    }
+    if let Some(n) = name {
+        if let Some(v) = map.get(n) {
+            return Some(v);
+        }
+    }
+    map.get(&idx.to_string())
+}
+
+pub fn workspace_matches_filter(
+    idx: u8,
+    name: Option<&str>,
+    output: Option<&str>,
+    filters: &[String],
+) -> bool {
+    if filters.is_empty() {
+        return true;
+    }
+    let idx_str = idx.to_string();
+    for filter in filters {
+        if let Some((left, right)) = filter.split_once('@') {
+            let output_matches =
+                output.is_some_and(|o| o == right || extract_display_prefix(o) == Some(right));
+            if output_matches && (left == idx_str || Some(left) == name) {
+                return true;
+            }
+        }
+        // Direct name or idx match
+        if Some(filter.as_str()) == name || *filter == idx_str {
+            return true;
+        }
+    }
+    false
 }
 
 pub trait FromConfig {
@@ -71,6 +162,7 @@ impl FromConfig for () {
 
 macro_rules! register_plugins {
     ($($name:expr => $variant:ident($module:ident::$struct:ident)),* $(,)?) => {
+        #[allow(clippy::large_enum_variant)]
         pub enum PluginEnum {
             $($variant($module::$struct),)*
         }
@@ -82,13 +174,13 @@ macro_rules! register_plugins {
                 }
             }
 
-            async fn handle_event(&mut self, event: &Event, niri: &NiriIpc) -> Result<()> {
+            async fn handle_event(&mut self, event: &PiriEvent, niri: &NiriIpc) -> Result<()> {
                 match self {
                     $(PluginEnum::$variant(p) => p.handle_event(event, niri).await,)*
                 }
             }
 
-            fn is_interested_in_event(&self, event: &Event) -> bool {
+            fn is_interested_in_event(&self, event: &PiriEvent) -> bool {
                 match self {
                     $(PluginEnum::$variant(p) => p.is_interested_in_event(event),)*
                 }
@@ -130,6 +222,13 @@ macro_rules! register_plugins {
                         ))
                     }).await?;
                 )*
+
+                // Seed the normalizer with the current window list to avoid
+                // false WindowOpened events for already-open windows.
+                if let Ok(windows) = niri.get_windows_raw().await {
+                    self.normalizer.rebuild_from_piri_windows(&windows);
+                }
+
                 Ok(())
             }
         }
@@ -146,12 +245,21 @@ register_plugins! {
     "workspace_rule" => WorkspaceRule(workspace_rule::WorkspaceRulePlugin),
     "fcitx5" => Fcitx5(fcitx5::Fcitx5Plugin),
     "sleepy" => Sleepy(sleepy::SleepyPlugin),
+    "mark" => Mark(mark::MarkPlugin),
+    "sticky" => Sticky(sticky::StickyPlugin),
 }
 
 pub struct PluginManager {
     plugins: Vec<PluginEnum>,
     event_listener_handle: Option<tokio::task::JoinHandle<()>>,
-    event_sender: Option<mpsc::UnboundedSender<Event>>,
+    event_sender: Option<mpsc::UnboundedSender<niri_ipc::Event>>,
+    normalizer: events::EventNormalizer,
+}
+
+impl Default for PluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PluginManager {
@@ -160,13 +268,14 @@ impl PluginManager {
             plugins: Vec::new(),
             event_listener_handle: None,
             event_sender: None,
+            normalizer: events::EventNormalizer::new(),
         }
     }
 
     pub async fn start_event_listener(
         &mut self,
         niri: NiriIpc,
-    ) -> Result<mpsc::UnboundedReceiver<Event>> {
+    ) -> Result<mpsc::UnboundedReceiver<niri_ipc::Event>> {
         let (tx, rx) = mpsc::unbounded_channel();
         let tx_clone = tx.clone();
         self.event_sender = Some(tx);
@@ -181,21 +290,23 @@ impl PluginManager {
         Ok(rx)
     }
 
-    async fn event_listener_loop(niri: NiriIpc, event_tx: mpsc::UnboundedSender<Event>) {
+    async fn event_listener_loop(niri: NiriIpc, event_tx: mpsc::UnboundedSender<niri_ipc::Event>) {
         info!("Plugin manager event listener started");
 
         let mut is_first_connection = true;
 
         // Outer loop: reconnect on connection failure
         loop {
-            let mut reader = match niri.open_event_stream_async().await {
-                Ok(reader) => reader,
+            let socket = match niri.create_event_stream_socket() {
+                Ok(s) => s,
                 Err(e) => {
                     warn!("Failed to create event stream: {}, retrying in 1s", e);
                     tokio::time::sleep(Duration::from_millis(1000)).await;
                     continue;
                 }
             };
+
+            let mut read_event = socket.read_events();
             info!("Event stream connected, waiting for events...");
 
             // Send notification on first successful connection
@@ -207,43 +318,7 @@ impl PluginManager {
                 is_first_connection = false;
             }
 
-            let mut line = String::new();
-            loop {
-                line.clear();
-                let n = match reader.read_line(&mut line).await {
-                    Ok(n) => n,
-                    Err(e) => {
-                        warn!("Failed reading event stream: {}", e);
-                        break;
-                    }
-                };
-
-                if n == 0 {
-                    warn!("Event stream reached EOF");
-                    break;
-                }
-
-                let payload = line.trim();
-                if payload.is_empty() {
-                    // Ignore empty heartbeat/blank lines instead of reconnecting.
-                    continue;
-                }
-
-                let event: Event = match serde_json::from_str(payload) {
-                    Ok(event) => event,
-                    Err(e) => {
-                        if e.to_string().contains("unknown variant") {
-                            debug!(
-                                "Ignoring unsupported event payload: {} | payload={}",
-                                e, payload
-                            );
-                        } else {
-                            warn!("Failed to parse event payload: {} | payload={}", e, payload);
-                        }
-                        continue;
-                    }
-                };
-
+            while let Ok(event) = read_event() {
                 debug!("Raw event received: {:?}", event);
 
                 // Send event to channel for distribution
@@ -254,20 +329,27 @@ impl PluginManager {
             }
 
             // Connection closed or error - will reconnect in outer loop
+            // Refresh outputs cache since state may have changed during disconnection
+            if let Err(e) = niri.refresh_outputs().await {
+                log::warn!("Failed to refresh outputs cache on reconnect: {}", e);
+            }
             warn!("Event stream closed, reconnecting...");
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     }
 
-    /// Distribute event to all plugins (called from daemon loop)
-    /// Only plugins that are interested in the event type will receive it
-    pub async fn distribute_event(&mut self, event: &Event, niri: &NiriIpc) {
-        for plugin in &mut self.plugins {
-            // Check if plugin is interested in this event type
-            if plugin.is_interested_in_event(event) {
-                if let Err(e) = plugin.handle_event(event, niri).await {
-                    log::warn!("Plugin {} error: {}", plugin.name(), e);
-                    send_notification("piri", &format!("Plugin {} error", plugin.name()));
+    /// Distribute event to all plugins (called from daemon loop).
+    /// Normalizes niri events into PiriEvents before dispatching.
+    pub async fn distribute_event(&mut self, event: &niri_ipc::Event, niri: &NiriIpc) {
+        let piri_events = self.normalizer.normalize_event(event);
+
+        for piri_event in &piri_events {
+            for plugin in &mut self.plugins {
+                if plugin.is_interested_in_event(piri_event) {
+                    if let Err(e) = plugin.handle_event(piri_event, niri).await {
+                        log::warn!("Plugin {} error: {}", plugin.name(), e);
+                        send_notification("piri", &format!("Plugin {} error", plugin.name()));
+                    }
                 }
             }
         }

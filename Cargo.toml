@@ -1,6 +1,6 @@
 [package]
 name = "piri"
-version = "0.1.5"
+version = "0.1.8"
 edition = "2021"
 authors = ["Starfall"]
 description = "Extend niri compositor capabilities with extensible command system and plugins"
@@ -19,11 +19,14 @@ log = "0.4"
 env_logger = "0.11"
 shellexpand = "3.1"
 libc = "0.2"
-niri-ipc = "25.11"
+niri-ipc = "26.4.0"
 async-trait = "0.1"
 regex = "1.10"
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = [
-  "json",
-  "rustls-tls",
+    "json",
+    "rustls-tls",
 ] }
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+cairo-rs = "0.20"

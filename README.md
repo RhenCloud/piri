@@ -4,18 +4,21 @@
 
 ---
 
-Piri 是基于 Rust 的 [Niri](https://github.com/YaLTeR/niri) 高性能功能扩展工具。它通过高效的 Niri IPC 交互和统一的事件分发机制，为 Niri 提供稳健的状态驱动插件系统。
+Piri 是基于 Rust 开发的 [Niri](https://github.com/YaLTeR/niri) 合成器扩展工具，通过高效的 IPC 交互与统一的事件分发机制，提供稳健的状态驱动插件系统。
 
 ## 核心插件
 
 - 📦 **Scratchpads**: 智能隐藏/显示窗口。支持自动捕获已有窗口或按需启动应用，跨工作区与显示器无缝跟随（详见 [Scratchpads 文档](docs/zh/plugins/scratchpads.md)）
 - 🔌 **Empty**: 空白工作区自动化。在切换到空工作区时自动触发预设命令，助您快速进入工作状态（详见 [Empty 文档](docs/zh/plugins/empty.md)）
 - 🎯 **Window Rule**: 强大规则引擎。基于正则匹配实现窗口自动归位，并提供带去重机制的焦点触发命令执行（详见 [Window Rule 文档](docs/zh/plugins/window_rule.md)）
-- 📐 **Workspace Rule**: 工作区窗口布局管理。提供自动宽度调整、自动平铺、自动对齐和自动最大化等功能，整合了原 Autofill 功能（详见 [Workspace Rule 文档](docs/zh/plugins/workspace_rule.md)）
+- 📐 **Workspace Rule**: 工作区窗口布局管理。提供自动宽度调整、自动平铺、自动对齐和自动最大化等功能，整合了原 Autofill 功能。内置 EdgePulse 边缘提示（详见 [Workspace Rule 文档](docs/zh/plugins/workspace_rule.md), [EdgePulse](docs/zh/plugins/edge_pulse.md)）
 - 🔒 **Singleton**: 单实例保障。确保特定应用全局唯一，支持快速聚焦现有实例或自动拉起新进程（详见 [Singleton 文档](docs/zh/plugins/singleton.md)）
+- 📌 **Mark**: 窗口标记与快速聚焦，绑定存于内存（详见 [文档](docs/zh/plugins/mark.md)）
+- 📍 **Sticky**: 浮动窗口跟随，支持跨显示器（详见 [文档](docs/zh/plugins/sticky.md)）
 - 📋 **Window Order**: 智能窗口排序。根据配置权重自动重排平铺窗口，相同权重窗口保持相对位置以最小化移动损耗（详见 [Window Order 文档](docs/zh/plugins/window_order.md)）
 - 🍽️ **Swallow**: 窗口吞噬机制。当子窗口打开时自动隐藏父窗口，让子窗口在布局中替换父窗口的位置（详见 [Swallow 文档](docs/zh/plugins/swallow.md)）
 - 😴 **Sleepy**: 在线状态同步。窗口焦点变化时自动上报当前应用状态到 Sleepy 服务端（详见 [Sleepy 文档](docs/zh/plugins/sleepy.md)）
+- ⌨️ **Fcitx5**: 输入法自动化。窗口焦点变化时自动切换输入法模式（详见 [Fcitx5 文档](docs/zh/plugins/fcitx5.md)）
 
 ## 窗口匹配机制
 
@@ -39,7 +42,6 @@ Piri 使用统一的窗口匹配机制，支持通过正则表达式匹配窗口
 最简单的方式是使用提供的安装脚本：
 
 ```bash
-# 运行安装脚本
 ./install.sh
 ```
 
@@ -81,12 +83,12 @@ cp config.example.toml ~/.config/niri/piri.toml
 
 ## 使用方法
 
-### 启动守护进程
+### 启动 daemon
 
 #### 手动启动
 
 ```bash
-# 启动守护进程（前台运行）
+# 启动 daemon（前台运行）
 piri daemon
 ```
 
@@ -125,9 +127,9 @@ piri completion fish > ~/.config/fish/completions/piri.fish
 
 ### Scratchpads
 
-![Scratchpads](./assets/scratchpads.mp4)
+https://github.com/user-attachments/assets/1c40d75b-310a-4503-9d59-92f0479a54d5
 
-快速显示和隐藏常用应用程序的窗口。支持跨 workspace 和 monitor，无论你在哪个工作区或显示器上，都能快速访问你的 scratchpad 窗口。支持**动态添加窗口**、**自动保留手动调整的大小与边距**、**隐藏后自动移动到指定工作区**，以及**将窗口吞入当前聚焦的窗口**（`swallow_to_focus` 选项）。
+快速显示/隐藏常用窗口，支持跨工作区与显示器。特性：**动态添加**、**保留手动调整**、**隐藏后移至指定工作区**、**吞入聚焦窗口**（`swallow_to_focus`）、**Sticky 跟随**（`sticky`，委托 sticky 插件）、**失焦自动隐藏**（`auto_hide_on_focus_loss`）及**非浮动窗口直接聚焦**。
 
 **配置示例**：
 ```toml
@@ -153,7 +155,25 @@ app_id = "imv"
 size = "60% 80%"
 margin = 50
 swallow_to_focus = true  # 显示时自动吞入当前聚焦的窗口
+
+[scratchpads.note]
+direction = "fromTop"
+command = "gnome-text-editor"
+app_id = "org.gnome.TextEditor"
+size = "50% 40%"
+margin = 100
+sticky = true  # 跟随焦点工作区（由 sticky 插件处理）
+
+[scratchpads.calc]
+direction = "fromBottom"
+command = "gnome-calculator"
+app_id = "org.gnome.Calculator"
+size = "30% 40%"
+margin = 50
+auto_hide_on_focus_loss = true  # 失去焦点时自动隐藏
 ```
+
+> **注意**: 同一个 scratchpad 不能同时启用 `sticky` 和 `auto_hide_on_focus_loss`。
 
 **快速使用**：
 ```bash
@@ -200,7 +220,7 @@ command = "firefox"
 
 ### Window Rule
 
-根据窗口的 `app_id` 或 `title` 使用正则表达式匹配，自动将窗口移动到指定的 workspace，并支持在窗口获得焦点时执行命令。
+基于正则匹配自动归位窗口至指定 workspace，支持焦点触发命令执行。
 
 **配置示例**：
 ```toml
@@ -240,6 +260,11 @@ focus_command_once = true
 app_id = ["code", "code-oss", "codium"]
 open_on_workspace = "dev"
 
+# 锁定窗口到指定 workspace（末尾 ! 表示锁定，窗口无法被移走）
+[[window_rule]]
+app_id = "firefox"
+open_on_workspace = "1@eDP!"
+
 # title 作为列表（任意一个匹配即可）
 [[window_rule]]
 title = [".*Chrome.*", ".*Chromium.*", ".*Google Chrome.*"]
@@ -247,23 +272,26 @@ open_on_workspace = "browser"
 ```
 
 **特性**：
-- 正则表达式模式匹配支持
-- 根据 `app_id` 或 `title` 匹配，或两者组合（OR 逻辑）
-- 支持模式列表：`app_id` 和 `title` 可以是列表，任意一个匹配即可触发规则
-- 支持 workspace 名称或索引匹配
-- 焦点触发的命令执行，内置去重机制
-- `focus_command_once` 选项：对每个规则全局仅执行一次 `focus_command`（参见 [issue #1](https://github.com/Asthestarsfalll/piri/issues/1)）
-- 纯事件驱动，实时响应窗口创建
+- 正则匹配（`app_id`/`title`，支持列表与 OR 逻辑）
+- 支持 workspace 名称/索引
+- Workspace 锁定（`!` 后缀），防止窗口被移走
+- 焦点触发命令，内置去重机制
+- `focus_command_once`：规则级单次执行（[issue #1](https://github.com/Asthestarsfalll/piri/issues/1)）
+- 纯事件驱动
 
 详细说明请参考 [Window Rule 文档](docs/zh/plugins/window_rule.md) 和 [窗口匹配机制文档](docs/zh/window_matching.md)。
 
 ### Workspace Rule
 
-![Workspace Rule - Autofill](./assets/autofill.mp4)
+https://github.com/user-attachments/assets/092a383c-993b-42b5-9b89-b78b0807b436
 
-![Workspace Rule - Auto Tile](./assets/auto_tile.mp4)
+https://github.com/user-attachments/assets/b48b0465-0101-4298-9935-22f46d1a2658
 
-工作区窗口布局管理插件，提供自动宽度调整、自动平铺、自动对齐和自动最大化等功能。整合了原 Autofill 插件的功能，提供更全面的工作区窗口管理能力。
+https://github.com/user-attachments/assets/3b8dc835-473c-4b6e-b684-02a6951b63f9
+
+https://github.com/user-attachments/assets/2e9e2c86-b9ef-44f1-a896-46473b93b417
+
+工作区布局管理，提供自动宽度、平铺、对齐与最大化。内置 EdgePulse 边缘提示（支持动画），聚焦列到达边缘时渲染视觉提示。
 
 **配置示例**：
 ```toml
@@ -273,8 +301,17 @@ workspace_rule = true
 # 默认配置（应用到所有工作区）
 [piri.workspace_rule]
 auto_width = ["100%", "50%", "33.33%", "25%", "20%"]
-auto_fill = true  # 自动对齐（原 Autofill 功能）
+auto_fill = true  # 启用自动对齐
 auto_maximize = true  # 自动最大化
+
+# EdgePulse 边缘提示（支持动画）
+[piri.workspace_rule.edge_pulse]
+enabled = true
+animation_enabled = true  # 启用动画
+animation_style = "pulse"  # pulse 呼吸效果，fade 淡入效果
+animation_duration = 600  # 动画周期（毫秒）
+animation_amplitude = 0.8  # 动画强度
+animation_repeat = 3  # 每次触发播放次数（0=无限）
 
 # 工作区特定配置
 [workspace_rule.main]
@@ -282,36 +319,22 @@ auto_maximize = true
 
 [workspace_rule.dev]
 auto_width = ["100%", ["45%", "55%"], ["30%", "35%", "35%"]]
-auto_tile = true  # 自动平铺
+auto_tile = true  # auto_tile
 ```
 
 **特性**：
 - 自动宽度调整：根据窗口数量自动调整窗口宽度
-- 自动平铺：自动将新窗口合并到现有列中
-- 自动对齐：窗口关闭后自动对齐到最右侧（原 Autofill 功能）
-- 自动最大化：只有一个窗口时自动最大化，多个窗口时自动取消最大化
-- 工作区感知：每个工作区可以独立配置
-- 灵活配置：支持默认配置和工作区特定配置
-
-**从 Autofill 迁移**：
-```toml
-# 旧配置
-[piri.plugins]
-autofill = true
-
-# 新配置
-[piri.plugins]
-workspace_rule = true
-
-[piri.workspace_rule]
-auto_fill = true  # 启用原 Autofill 功能
-```
+- auto_tile：自动将新窗口合并到现有列中
+- 自动对齐：窗口关闭后自动对齐到最右侧
+- 自动最大化：单窗口时自动最大化，多窗口时取消最大化
+- EdgePulse 边缘提示：聚焦列到达边缘时渲染视觉提示
+- 工作区感知：每个工作区可独立配置
 
 详细说明请参考 [Workspace Rule 文档](docs/zh/plugins/workspace_rule.md)。
 
 ### Singleton
 
-管理单例窗口——只应该有一个实例的窗口。当你切换一个单例时，如果窗口已经存在，它会聚焦该窗口；否则，它会启动应用程序。这对于浏览器、终端或其他通常只需要一个实例运行的工具非常有用。
+管理单例窗口，确保全局唯一。切换时聚焦已有实例或启动新进程，适用于浏览器、终端等。
 
 **配置示例**：
 ```toml
@@ -338,21 +361,73 @@ piri singleton {name} toggle
 ```
 
 **特性**：
-- 智能窗口检测，自动检测现有窗口
-- 自动 App ID 提取，无需手动指定
-- 窗口注册表，快速查找已存在的窗口
-- 自动聚焦现有窗口，避免重复实例
-- 支持窗口创建后执行自定义命令（`on_created_command`）
+- 智能检测现有窗口，自动提取 App ID
+- 窗口注册表快速查找
+- 支持创建后执行命令（`on_created_command`）
 
 详细说明请参考 [Singleton 文档](docs/zh/plugins/singleton.md)。
 
+### Mark
+
+为窗口设置命名标记（如 `a`、`b`），用于快速聚焦。标记存于内存，重启 daemon 后清空。无需配置文件，启用插件后通过 Niri `spawn` 绑定即可。
+
+**配置示例**：
+
+```toml
+[piri.plugins]
+mark = true
+```
+
+**快速使用**：
+
+```bash
+# 无有效绑定时：把当前焦点窗口绑定到名称；已有且窗口仍在：聚焦该窗口
+piri mark {name} toggle
+
+# 强制把当前窗口绑定到名称（覆盖原绑定）
+piri mark {name} add
+
+# 删除该标记
+piri mark {name} delete
+```
+
+**说明**：Piri 无法全局捕获「下一个按键」；若希望少占快捷键，可配合启动器（如 `fuzzel`）选字母后再调用上述命令。Niri 若支持多键序列或绑定模式，可将多条 `piri mark …` 收拢在同一前缀下。
+
+详细说明请参考 [Mark 文档](docs/zh/plugins/mark.md)。
+
+### Sticky
+
+将当前焦点的**浮动窗口**设为“跟随窗口”，在你切换焦点工作区时自动跟随。适用于词典、翻译、日志、播放器控制等常驻小窗场景。
+
+**配置示例**：
+
+```toml
+[piri.plugins]
+sticky = true
+```
+
+**快速使用**：
+
+```bash
+# 设为 sticky（仅同 monitor 跟随）
+piri sticky add
+
+# 设为 sticky（允许跨 monitor）
+piri sticky add --cross
+
+# 取消 sticky
+piri sticky delete
+```
+
+详细说明请参考 [Sticky 文档](docs/zh/plugins/sticky.md)。
+
 ### Window Order
 
-![Window Order - 手动触发](./assets/window_order.mp4)
+https://github.com/user-attachments/assets/2c9cbbb4-7001-44ce-acfd-afb51dfbc372
 
-![Window Order - 事件监听自动触发](./assets/window_order_envent.mp4)
+https://github.com/user-attachments/assets/9818d478-3a33-456b-8367-548bb8ab7da7
 
-根据配置的权重值自动重排工作区中的窗口顺序。权重值越大，窗口越靠左。
+按权重自动重排窗口，权重越大越靠左。
 
 **配置示例**：
 ```toml
@@ -377,19 +452,21 @@ piri window_order toggle
 ```
 
 **特性**：
-- 智能排序算法，最小化窗口移动次数
-- 支持手动触发和事件驱动自动触发
-- 支持工作区过滤（仅自动触发时生效）
-- 相同权重窗口保持相对顺序
+- 智能排序，最小化移动次数
+- 支持手动/事件驱动触发
+- 支持工作区过滤
+- 相同权重保持相对顺序
 - 支持 `app_id` 部分匹配
 
 详细说明请参考 [Window Order 文档](docs/zh/plugins/window_order.md)。
 
 ### Swallow
 
-![Swallow](./assets/autofill_1.mp4)
+https://github.com/user-attachments/assets/9968e97f-fdea-4211-a007-717edf703e93
 
-当子窗口打开时自动隐藏父窗口，让子窗口在布局中替换父窗口的位置。这对于终端启动图片查看器或媒体播放器等场景非常有用。
+https://github.com/user-attachments/assets/51567d89-8ca8-4f4a-b2ca-732dfc0741c9
+
+子窗口打开时自动隐藏父窗口，让子窗口替换父窗口位置。适用于终端启动图片查看器或媒体播放器等场景。
 
 **配置示例**：
 ```toml
@@ -414,18 +491,18 @@ child_app_id = [".*preview.*", ".*markdown.*"]
 ```
 
 **特性**：
-- 支持基于 PID 的父子进程匹配（默认启用）
-- 支持基于规则的匹配（通过 `app_id`、`title` 或 `pid` 模式）
-- 支持全局和规则级别的排除规则
-- 智能聚焦窗口队列，自动查找父窗口
-- 自动处理工作空间移动和浮动窗口转换
-- 智能浮动窗口处理：浮动窗口不会被吞噬，从浮动转为平铺时会重新尝试吞噬
+- 支持 PID 父子进程匹配（默认启用）
+- 支持规则匹配（`app_id`/`title`/`pid`）
+- 支持全局/规则级排除
+- 智能聚焦窗口队列
+- 自动处理工作区移动与浮动转换
 
 详细说明请参考 [Swallow 文档](docs/zh/plugins/swallow.md)。
 
 ## 文档
 
 - [架构设计](docs/zh/architecture.md) - 项目架构和工作原理
+- [细粒度事件拆分](docs/zh/event_normalization.md) - 事件拆分机制详解
 - [插件系统](docs/zh/plugins/plugins.md) - 插件系统详细说明
 - [开发指南](docs/zh/development.md) - 开发、扩展和贡献指南
 

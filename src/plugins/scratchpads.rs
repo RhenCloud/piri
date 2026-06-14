@@ -11,9 +11,11 @@ use crate::config::{Config, Direction, ScratchpadConfig};
 use crate::ipc::IpcRequest;
 use crate::niri::NiriIpc;
 use crate::plugins::window_utils::{
-    self, get_focused_window, perform_swallow, WindowMatcher, WindowMatcherCache,
+    self, get_focused_window, perform_swallow, register_sticky_window, WindowMatcher,
+    WindowMatcherCache,
 };
 use crate::plugins::FromConfig;
+use crate::plugins::PiriEvent;
 use crate::utils::send_notification;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,7 +167,7 @@ impl ScratchpadManager {
                 );
                 let child_window = self
                     .niri
-                    .get_windows()
+                    .get_windows_raw()
                     .await?
                     .into_iter()
                     .find(|w| w.id == window_id)
@@ -308,7 +310,9 @@ impl ScratchpadManager {
         let state = self.states.get_mut(name).context("State not found")?;
 
         if let Some(window_id) = state.window_id {
-            if window_utils::window_exists(&self.niri, window_id).await? {
+            // Fetch windows once and reuse for existence check
+            let windows = self.niri.get_windows_raw().await?;
+            if window_utils::window_exists_in_cache(&windows, window_id) {
                 return Ok(window_id);
             }
             debug!(
@@ -328,7 +332,8 @@ impl ScratchpadManager {
 
         info!("Finding or launching window for scratchpad {}", name);
         let config = state.config.clone();
-        let matcher = WindowMatcher::new(Some(vec![config.app_id.clone()]), None);
+        let patterns = vec![config.app_id.clone()];
+        let matcher = WindowMatcher::new(Some(&patterns), None);
 
         let window_id = if let Some(window) =
             window_utils::find_window_by_matcher(self.niri.clone(), &matcher, &self.matcher_cache)
@@ -352,6 +357,11 @@ impl ScratchpadManager {
         self.setup_window(window_id, &config).await?;
         let state = self.states.get_mut(name).unwrap();
         state.window_id = Some(window_id);
+
+        // Delegate sticky behavior to the sticky plugin via global registry
+        if config.sticky {
+            register_sticky_window(window_id, true);
+        }
 
         Ok(window_id)
     }
@@ -380,13 +390,65 @@ impl ScratchpadManager {
         // 2. Ensure window exists and is set up
         let window_id = self.ensure_window_id(name).await?;
 
+        // Get config early to check refocus setting
+        let config = self.states.get(name).map(|s| s.config.clone()).context("State not found")?;
+
+        // 3. Check if window is floating, if not, handle as tiled window
+        if let Some(window) =
+            self.niri.get_windows_raw().await?.into_iter().find(|w| w.id == window_id)
+        {
+            debug!(
+                "Scratchpad '{}' window {} floating status: {}",
+                name, window_id, window.floating
+            );
+            if !window.floating {
+                debug!(
+                    "Scratchpad '{}' window {} is tiled, handling focus toggle",
+                    name, window_id
+                );
+                let state = self.states.get_mut(name).unwrap();
+
+                // Check if the scratchpad window is currently focused
+                if let Ok(current) = window_utils::get_focused_window(&self.niri).await {
+                    if current.id == window_id {
+                        // Window is already focused, try refocus if enabled
+                        if config.refocus
+                            && window_utils::try_refocus_to_previous(
+                                &self.niri,
+                                window_id,
+                                &mut state.previous_focused_window,
+                            )
+                            .await?
+                        {
+                            return Ok(());
+                        }
+                        // Already focused and refocus not enabled or failed, do nothing
+                        return Ok(());
+                    } else {
+                        // Window is not focused, save current focus and focus the scratchpad
+                        debug!(
+                            "Saving previous window {} before focusing scratchpad",
+                            current.id
+                        );
+                        state.previous_focused_window = Some(current.id);
+                    }
+                } else {
+                    // No focused window, clear previous
+                    state.previous_focused_window = None;
+                }
+
+                window_utils::focus_window(self.niri.clone(), window_id).await?;
+                return Ok(());
+            }
+        }
+
         // Collect all scratchpad window IDs before getting mutable borrow
         let scratchpad_window_ids: Vec<u64> =
             self.states.values().filter_map(|s| s.window_id).collect();
 
         let state = self.states.get_mut(name).unwrap();
 
-        // 3. Determine next state
+        // 4. Determine next state (for floating windows)
         if state.is_visible {
             let (current_workspace, windows) =
                 window_utils::get_workspace_and_windows(&self.niri).await?;
@@ -395,35 +457,22 @@ impl ScratchpadManager {
             });
 
             if in_current_workspace {
+                // Floating window: just hide it (no refocus for floating)
                 state.is_visible = false;
             } else {
                 // Already visible but elsewhere, re-record focus and it will be moved in sync_state
                 let focused = self.niri.get_focused_window_id().await?;
-                state.previous_focused_window = if let Some(focused_id) = focused {
-                    if scratchpad_window_ids.contains(&focused_id) {
-                        None
-                    } else {
-                        Some(focused_id)
-                    }
-                } else {
-                    None
-                };
+                state.previous_focused_window =
+                    focused.filter(|&focused_id| !scratchpad_window_ids.contains(&focused_id));
             }
         } else {
             let focused = self.niri.get_focused_window_id().await?;
-            state.previous_focused_window = if let Some(focused_id) = focused {
-                if scratchpad_window_ids.contains(&focused_id) {
-                    None
-                } else {
-                    Some(focused_id)
-                }
-            } else {
-                None
-            };
+            state.previous_focused_window =
+                focused.filter(|&focused_id| !scratchpad_window_ids.contains(&focused_id));
             state.is_visible = true;
         }
 
-        // 4. Sync
+        // 5. Sync
         self.sync_state(name, move_to_workspace).await
     }
 
@@ -462,6 +511,9 @@ impl ScratchpadManager {
             size: default_size.to_string(),
             margin: default_margin,
             swallow_to_focus,
+            sticky: false,
+            auto_hide_on_focus_loss: false,
+            refocus: false,
         };
 
         self.setup_window(window.id, &config).await?;
@@ -477,6 +529,46 @@ impl ScratchpadManager {
             },
         );
 
+        Ok(())
+    }
+
+    // Sticky behavior is delegated to the sticky plugin via global registry.
+    // Scratchpads only register/unregister windows; sticky plugin handles workspace following.
+
+    async fn handle_focus_loss(
+        &mut self,
+        window_id: u64,
+        move_to_workspace: Option<String>,
+    ) -> Result<()> {
+        // Get list of windows to check floating status
+        let windows = self.niri.get_windows_raw().await?;
+
+        let names_to_hide: Vec<String> = self
+            .states
+            .iter()
+            .filter(|(_, state)| {
+                state.config.auto_hide_on_focus_loss
+                    && state.is_visible
+                    && state.window_id.is_some()
+                    && state.window_id != Some(window_id)
+            })
+            .filter(|(_, state)| {
+                // Only auto-hide if the window is still floating
+                if let Some(wid) = state.window_id {
+                    windows.iter().any(|w| w.id == wid && w.floating)
+                } else {
+                    false
+                }
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        for name in names_to_hide {
+            debug!("Auto-hiding scratchpad '{}' via toggle", name);
+            if let Err(e) = self.toggle(&name, None, move_to_workspace.clone()).await {
+                warn!("Failed to auto-hide scratchpad '{}': {}", name, e);
+            }
+        }
         Ok(())
     }
 }
@@ -542,7 +634,7 @@ impl crate::plugins::Plugin for ScratchpadsPlugin {
         self.config = config;
 
         // Clear matcher cache to reflect potential regex changes in config
-        self.manager.matcher_cache.clear_cache().await;
+        self.manager.matcher_cache.clear_cache();
 
         Ok(())
     }
@@ -573,8 +665,8 @@ impl crate::plugins::Plugin for ScratchpadsPlugin {
                     name, direction, swallow_to_focus
                 );
 
-                let direction = Direction::from_str(direction)
-                    .map_err(|e| anyhow::anyhow!("Invalid direction: {}", e))?;
+                let direction =
+                    direction.parse().map_err(|e| anyhow::anyhow!("Invalid direction: {}", e))?;
 
                 self.manager
                     .add_current_window(
@@ -590,5 +682,25 @@ impl crate::plugins::Plugin for ScratchpadsPlugin {
             }
             _ => Ok(None), // Not handled by this plugin
         }
+    }
+
+    async fn handle_event(&mut self, event: &PiriEvent, _niri: &NiriIpc) -> Result<()> {
+        // Scratchpads only handle auto_hide_on_focus_loss; sticky is delegated to sticky plugin
+        if let PiriEvent::WindowFocusChanged {
+            id: Some(window_id),
+        } = event
+        {
+            self.manager
+                .handle_focus_loss(*window_id, self.config.move_to_workspace.clone())
+                .await?;
+        }
+        Ok(())
+    }
+
+    fn is_interested_in_event(&self, event: &PiriEvent) -> bool {
+        // Only interested in WindowFocusChanged for auto_hide_on_focus_loss
+        // Sticky behavior is handled entirely by the sticky plugin via global registry
+        matches!(event, PiriEvent::WindowFocusChanged { id: Some(_) })
+            && self.manager.states.values().any(|s| s.config.auto_hide_on_focus_loss)
     }
 }

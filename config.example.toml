@@ -12,13 +12,14 @@
 scratchpads = true
 empty = true
 window_rule = true
-autofill = true
 singleton = true
 window_order = true
 swallow = true
 workspace_rule = true
 fcitx5 = true
 sleepy = false
+mark = true
+sticky = true
 
 [piri.scratchpad]
 default_size = "40% 60%"
@@ -32,7 +33,9 @@ default_margin = 50
 # Workspace identifier can be:
 # - name (String): workspace name, e.g., "main", "work"
 # - idx (u8): workspace index, e.g., "1", "2", "3"
-# Note: Matching order is name first, then idx. ID (u64) is not used for matching.
+# - idx@output: workspace index on specific monitor, e.g., "1@DP-2", "1@HDMI-A-1"
+# - name@output: workspace name on specific monitor, e.g., "browser@DP-2"
+# Note: Matching order is idx@output first, then name@output, then name, then idx. ID (u64) is not used for matching.
 [empty.1] # workspace index
 command = "notify-send 'Workspace 1 is empty'"
 
@@ -59,12 +62,32 @@ size = "60% 80%"
 margin = 50
 swallow_to_focus = true # Optional: swallow into focused window when shown
 
+# Example: scratchpad with sticky behavior (delegates to sticky plugin)
+[scratchpads.note]
+direction = "fromTop"
+command = "gnome-text-editor"
+app_id = "org.gnome.TextEditor"
+size = "50% 40%"
+margin = 100
+sticky = true  # Optional: follow focused workspace (handled by sticky plugin)
+
+# Example: scratchpad that auto-hides when focus is lost
+# Note: sticky and auto_hide_on_focus_loss cannot both be enabled
+[scratchpads.calc]
+direction = "fromBottom"
+command = "gnome-calculator"
+app_id = "org.gnome.Calculator"
+size = "30% 40%"
+margin = 50
+auto_hide_on_focus_loss = true  # Optional: auto-hide when window loses focus
+
 
 # Window rules: automatically move windows to workspaces based on app_id or title
 # Format: [[window_rule]]
 # - app_id: regex pattern to match window app_id (optional, but at least one of app_id or title must be specified)
 # - title: regex pattern to match window title (optional, but at least one of app_id or title must be specified)
-# - open_on_workspace: workspace to move matching windows to (exact name or idx match, name first, then idx)
+# - open_on_workspace: workspace to move matching windows to (exact name or idx match,
+#   supports monitor scoping with "idx@output" or "name@output" syntax, e.g., "1@DP-2")
 # - focus_command: command to execute when window gains focus (optional)
 # Note:
 #   - If both app_id and title are specified, the rule matches if EITHER matches (OR logic)
@@ -116,11 +139,28 @@ command = 'google-chrome-stable'
 command = 'GTK_IM_MODULE=wayland ghostty --class=singleton.term'
 app_id = 'singleton.term'
 
+# Mark plugin:
+# Runtime-only named marks for quick focus.
+# No [mark.*] table is needed; use CLI:
+#   piri mark {name} toggle
+#   piri mark {name} add
+#   piri mark {name} delete
+# Optional: [piri.mark] for refocus feature
+# [piri.mark]
+# refocus = true  # Toggle same mark again to jump back to previous window
+
+# Sticky plugin:
+# Runtime-only sticky floating window state.
+# No [sticky.*] table is needed; use CLI:
+#   piri sticky add
+#   piri sticky add --cross
+#   piri sticky delete
+
 # Window order: reorder windows in workspace based on app_id
 # Format: [piri.window_order] for plugin config, [window_order] for app_id weights
 # - enable_event_listener: enable automatic reordering on events (default: false)
 # - default_weight: default weight for windows not specified (default: 0)
-# - workspaces: list of workspace names/indices to apply ordering (default: all workspaces)
+# - workspaces: list of workspace names/indices to apply ordering (supports "idx@output" syntax, default: all workspaces)
 # Use 'piri window_order toggle' to manually reorder windows in current workspace
 [piri.window_order]
 enable_event_listener = false
@@ -149,7 +189,9 @@ parent_app_id = '.*ghostty.*'
 
 # Workspace rule: automatically adjust window widths based on window count
 # Format: [workspace_rule.{workspace}]
-# Workspace identifier can be name (e.g., "browser") or idx (e.g., "1")
+# Workspace identifier can be name (e.g., "browser"), idx (e.g., "1"),
+# or monitor-scoped: "idx@output" (e.g., "1@DP-2"), "name@output" (e.g., "browser@eDP-2")
+# Matching order: idx@output > name@output > name > idx (backward compatible fallback)
 # - auto_width: array where index corresponds to window count (1-based)
 #   Each element can be a string (all windows same width) or array (different widths per window)
 #   Examples:
@@ -162,6 +204,18 @@ parent_app_id = '.*ghostty.*'
 auto_width = ["100%", "50%", "33.33%", "25%", "20%"]
 # auto_maximize: automatically maximize window when there's only one window, and unmaximize when there are multiple windows
 # auto_maximize = true
+# EdgePulse: show left/right edge hint when focused column reaches the workspace edge
+# [piri.workspace_rule.edge_pulse]
+# enabled = true
+# show_left = true
+# show_right = true
+# width = 14
+# height_ratio = 0.42
+# left_gradient_start = "#68d8ff"
+# left_gradient_end = "#1f4fff"
+# right_gradient_start = "#ffd36a"
+# right_gradient_end = "#ff7a1f"
+# alpha = 0.85
 
 # Workspace-specific configuration (overrides default)
 [workspace_rule.1]
@@ -223,3 +277,22 @@ token = ""
 secret = ""
 # If true, use app_id as status text first; otherwise use window title
 prefer_app_id = false
+
+# --- Monitor-scoped examples ---
+#
+# Exact match: applies to a specific monitor
+# [workspace_rule."1@DP-2"]
+# auto_width = ["100%", "50%", "33.33%"]
+#
+# Display prefix match: applies to all monitors of that type
+# "1@DP" matches DP-1, DP-2, DP-3, ...
+# "1@HDMI" matches HDMI-A-1, HDMI-A-2, ...
+# [workspace_rule."1@DP"]
+# auto_width = ["100%", "50%", "33.33%"]
+# [workspace_rule."1@eDP"]
+# auto_width = ["100%", "50%", "33.33%", "25%"]
+#
+# Per-monitor empty workspace commands
+# [empty."1@HDMI-A-1"]     ← exact match
+# [empty."1@HDMI"]          ← display prefix match
+# command = "alacritty"

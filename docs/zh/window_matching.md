@@ -1,151 +1,117 @@
 # 窗口匹配机制
 
-Piri 使用统一的窗口匹配机制，支持通过正则表达式匹配窗口的 `app_id` 和 `title`。多个插件（如 `window_rule`、`singleton`、`scratchpads`）都使用此机制来查找和匹配窗口。
+Piri 使用统一的正则匹配机制，通过 `app_id` 和/或 `title` 查找窗口。插件 `window_rule`、`singleton`、`scratchpads` 等均使用此机制。
 
-## 支持的匹配方式
+## 匹配方式
 
-### 1. 正则表达式匹配
+### 正则表达式
 
-所有窗口匹配都基于 **正则表达式（Regex）**，支持完整的正则表达式语法。
+基于 Rust `regex` crate，支持完整正则语法。
 
-### 2. 匹配字段
+### 匹配字段
 
-- **`app_id`**: 窗口的应用 ID（可选）
-- **`title`**: 窗口标题（可选）
+- `app_id`: 应用 ID（可选）
+- `title`: 窗口标题（可选）
 
-**注意**: 至少需要指定 `app_id` 或 `title` 中的一个。如果两者都指定，则任一匹配即可（OR 逻辑）。
-
-## 匹配逻辑
-
-1. **单一字段匹配**: 如果只指定了 `app_id` 或 `title`，则必须匹配该字段
-2. **多字段匹配**: 如果同时指定了 `app_id` 和 `title`，则任一匹配即可（OR 逻辑）
-3. **正则表达式**: 使用 Rust 的 `regex` crate，支持完整的正则表达式语法
+**至少指定其一**，同时指定时任一匹配即可（OR 逻辑）。
 
 ## 使用示例
 
 ### 基本匹配
 
 ```toml
-# 精确匹配 app_id
-app_id = "code"
-
-# 匹配包含特定字符串的 app_id
-app_id = ".*chrome.*"
-
-# 匹配以特定字符串开头的 app_id
-app_id = "^firefox"
-
-# 匹配精确的 app_id（使用锚点）
-app_id = "^code$"
+app_id = "code"              # 精确匹配
+app_id = ".*chrome.*"        # 包含匹配
+app_id = "^firefox"           # 开头匹配
+app_id = "^code$"             # 精确锚定
 ```
 
 ### 标题匹配
 
 ```toml
-# 匹配包含 "Chrome" 的标题
-title = ".*Chrome.*"
-
-# 匹配以 "VS Code" 开头的标题
-title = "^VS Code"
-
-# 匹配包含数字的标题
-title = ".*\\d+.*"
+title = ".*Chrome.*"          # 包含 "Chrome"
+title = "^VS Code"            # 以 "VS Code" 开头
+title = ".*\\d+.*"           # 包含数字
 ```
 
 ### 组合匹配
 
 ```toml
-# app_id 或 title 任一匹配即可
 app_id = "code"
-title = ".*VS Code.*"
+title = ".*VS Code.*"      # app_id 或 title 任一匹配即可
 ```
 
-## 在插件中的使用
+## 插件使用示例
 
-### Window Rule 插件
+### Window Rule
 
 ```toml
 [[window_rule]]
 app_id = ".*firefox.*"
 open_on_workspace = "2"
-
-[[window_rule]]
-title = ".*Chrome.*"
-open_on_workspace = "3"
-focus_command = "notify-send 'Focusing on Chrome'"
 ```
 
-> **注意**: Window Rule 插件支持列表匹配（`app_id` 和 `title` 可以是列表），详见 [Window Rule 文档](plugins/window_rule.md)。
+> Window Rule 支持列表匹配，详见 [文档](plugins/window_rule.md)。
 
-### Singleton 插件
+### Singleton
 
 ```toml
 [singleton.browser]
 command = "google-chrome-stable"
-app_id = "google-chrome"  # 使用正则表达式匹配
+app_id = "google-chrome"
 ```
 
-### Scratchpads 插件
+### Scratchpads
 
 ```toml
 [scratchpads.term]
 direction = "fromRight"
 command = "ghostty"
-app_id = "float\\.dropterm"  # 使用正则表达式匹配，注意转义点号
+app_id = "float\\.dropterm"  # 转义点号
 ```
 
-## 正则表达式语法参考
+## 正则语法参考
 
 ### 常用模式
 
 | 模式 | 说明 | 示例 |
 |------|------|------|
-| `.` | 匹配任意字符 | `"c.ode"` 匹配 `"code"`, `"cade"` |
-| `.*` | 匹配任意字符（零个或多个） | `".*chrome.*"` 匹配包含 `chrome` 的字符串 |
-| `^` | 匹配字符串开头 | `"^firefox"` 匹配以 `firefox` 开头的字符串 |
-| `$` | 匹配字符串结尾 | `"code$"` 匹配以 `code` 结尾的字符串 |
-| `[abc]` | 匹配字符集中的任意字符 | `"[abc]ode"` 匹配 `"aode"`, `"bode"`, `"code"` |
-| `[0-9]` | 匹配数字 | `"[0-9]+"` 匹配一个或多个数字 |
-| `\d` | 匹配数字（等价于 `[0-9]`） | `"\d+"` 匹配一个或多个数字 |
-| `\w` | 匹配单词字符（字母、数字、下划线） | `"\w+"` 匹配单词 |
-| `+` | 一个或多个 | `"[0-9]+"` 匹配一个或多个数字 |
-| `*` | 零个或多个 | `".*"` 匹配任意字符串 |
-| `?` | 零个或一个 | `"colou?r"` 匹配 `"color"` 或 `"colour"` |
-| `\|` | 或 | `"firefox\|chrome"` 匹配 `"firefox"` 或 `"chrome"` |
+| `.` | 任意字符 | `"c.ode"` → `"code"`, `"cade"` |
+| `.*` | 零或多个任意字符 | `".*chrome.*"` → 包含 `chrome` |
+| `^` | 字符串开头 | `"^firefox"` → 以 `firefox` 开头 |
+| `$` | 字符串结尾 | `"code$"` → 以 `code` 结尾 |
+| `[abc]` | 字符集 | `"[abc]ode"` → `"aode"`, `"bode"`, `"code"` |
+| `\d` | 数字（同 `[0-9]`） | `"\d+"` → 一个或多个数字 |
+| `\w` | 单词字符 | `"\w+"` → 单词 |
+| `+` | 一个或多个 | `"[0-9]+"` |
+| `*` | 零个或多个 | `".*"` |
+| `?` | 零个或一个 | `"colou?r"` → `"color"`/`"colour"` |
+| `\|` | 或 | `"firefox\|chrome"` |
 
 ### 转义特殊字符
 
-如果需要在模式中匹配特殊字符（如 `.`, `*`, `+`, `?`, `[`, `]`, `(`, `)`, `{`, `}`, `^`, `$`, `|`, `\`），需要使用反斜杠转义：
+特殊字符（`.`, `*`, `+`, `?`, `[`, `]`, `(`, `)`, `{`, `}`, `^`, `$`, `|`, `\`）需转义：
 
 ```toml
-# 匹配包含点号的 app_id
-app_id = "float\\.dropterm"
-
-# 匹配包含括号的标题
-title = ".*\\(.*\\).*"
+app_id = "float\\.dropterm"  # 转义点号
+title = ".*\\(.*\\).*"      # 转义括号
 ```
 
-## 性能优化
+## 性能与最佳实践
 
-1. **正则表达式缓存**: 编译后的正则表达式会被缓存，避免重复编译
-2. **简单模式优先**: 使用简单明确的模式可以获得更好的性能
-3. **避免过度复杂**: 过于复杂的正则表达式可能影响性能
-
-## 最佳实践
-
-1. **精确匹配**: 如果知道确切的 `app_id`，使用 `^app_id$` 进行精确匹配
-2. **部分匹配**: 使用 `.*pattern.*` 进行部分匹配
-3. **转义特殊字符**: 如果 `app_id` 或 `title` 包含正则表达式特殊字符，记得转义
-4. **测试模式**: 在配置前，可以使用在线正则表达式测试工具验证模式是否正确
+1. **正则缓存**：编译后缓存，避免重复编译
+2. **简单模式**：简单明确的模式性能更好
+3. **精确匹配**：已知 `app_id` 时用 `^app_id$`
+4. **部分匹配**：`".*pattern.*"` 进行部分匹配
+5. **转义特殊字符**：包含特殊字符时记得转义
+6. **测试模式**：配置前用在线工具验证
 
 ## 调试技巧
 
-如果窗口匹配不工作，可以：
-
-1. **检查日志**: 查看 piri 的日志输出，了解匹配过程
-2. **验证 app_id/title**: 使用 `niri-ipc` 工具查看窗口的实际 `app_id` 和 `title`
-3. **测试正则表达式**: 使用在线工具测试正则表达式是否正确
-4. **简化模式**: 先使用简单的模式（如精确匹配）验证基本功能，再逐步复杂化
+1. **检查日志**：查看 piri 日志了解匹配过程
+2. **验证 app_id/title**：用 `niri-ipc` 查看实际值
+3. **测试正则**：使用在线工具测试
+4. **简化模式**：先用简单模式验证，再逐步复杂化
 
 ## 示例配置
 
@@ -157,7 +123,7 @@ app_id = ".*(firefox|chrome|chromium).*"
 open_on_workspace = "browser"
 ```
 
-### 匹配开发工具
+### 匹配开发工具、终端
 
 ```toml
 [[window_rule]]
@@ -165,19 +131,16 @@ app_id = ".*(code|vscode|idea).*"
 open_on_workspace = "dev"
 ```
 
-### 匹配终端
-
 ```toml
 [[window_rule]]
 app_id = ".*(term|terminal|ghostty|alacritty).*"
 open_on_workspace = "1"
 ```
 
-### 使用标题匹配特定窗口
+### 标题匹配
 
 ```toml
 [[window_rule]]
 title = ".*GitHub.*"
 open_on_workspace = "dev"
 ```
-

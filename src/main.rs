@@ -60,13 +60,26 @@ enum Commands {
         #[command(subcommand)]
         action: WindowOrderAction,
     },
+    /// Window marks (bind a key/name to a window for quick focus)
+    Mark {
+        /// Mark name (e.g. a key letter)
+        name: String,
+        #[command(subcommand)]
+        action: MarkAction,
+    },
+    /// Sticky floating window management
+    Sticky {
+        /// Action to perform
+        #[command(subcommand)]
+        action: StickyAction,
+    },
     /// Stop the daemon
     Stop,
     /// Generate shell completion script
     Completion {
         /// Shell type
         #[arg(value_enum)]
-        shell: Shell,
+        shell: CompletionShell,
     },
 }
 
@@ -96,8 +109,30 @@ enum WindowOrderAction {
     Toggle,
 }
 
+#[derive(Subcommand)]
+enum MarkAction {
+    /// Focus marked window if the binding is valid; otherwise bind the focused window
+    Toggle,
+    /// Remove this mark
+    Delete,
+    /// Bind the focused window to this mark (replaces an existing binding)
+    Add,
+}
+
+#[derive(Subcommand)]
+enum StickyAction {
+    /// Add focused floating window as sticky
+    Add {
+        /// If true, sticky window can follow across monitors
+        #[arg(long)]
+        cross: bool,
+    },
+    /// Remove current sticky window
+    Delete,
+}
+
 #[derive(Clone, ValueEnum)]
-enum Shell {
+enum CompletionShell {
     /// Bash completion script
     Bash,
     /// Zsh completion script
@@ -225,6 +260,51 @@ async fn async_main() -> Result<()> {
                 }
             }
         }
+        Commands::Mark { name, action } => {
+            let client = IpcClient::new(None);
+            match action {
+                MarkAction::Toggle => {
+                    handle_ipc_response(
+                        client.send_request(IpcRequest::MarkToggle { name: name.clone() }).await,
+                        &format!("Mark '{}' toggled", name),
+                        "Failed to toggle mark",
+                    )?;
+                }
+                MarkAction::Delete => {
+                    handle_ipc_response(
+                        client.send_request(IpcRequest::MarkDelete { name: name.clone() }).await,
+                        &format!("Mark '{}' removed", name),
+                        "Failed to delete mark",
+                    )?;
+                }
+                MarkAction::Add => {
+                    handle_ipc_response(
+                        client.send_request(IpcRequest::MarkAdd { name: name.clone() }).await,
+                        &format!("Mark '{}' set to focused window", name),
+                        "Failed to add mark",
+                    )?;
+                }
+            }
+        }
+        Commands::Sticky { action } => {
+            let client = IpcClient::new(None);
+            match action {
+                StickyAction::Add { cross } => {
+                    handle_ipc_response(
+                        client.send_request(IpcRequest::StickyAdd { cross }).await,
+                        "Sticky window added",
+                        "Failed to add sticky window",
+                    )?;
+                }
+                StickyAction::Delete => {
+                    handle_ipc_response(
+                        client.send_request(IpcRequest::StickyDelete).await,
+                        "Sticky window removed",
+                        "Failed to delete sticky window",
+                    )?;
+                }
+            }
+        }
         Commands::Stop => {
             let client = IpcClient::new(None);
             handle_ipc_response(
@@ -235,13 +315,20 @@ async fn async_main() -> Result<()> {
         }
         Commands::Completion { shell } => {
             let mut cmd = <Cli as CommandFactory>::command();
-            let mut stdout = io::stdout();
             match shell {
-                Shell::Bash => generate(shells::Bash, &mut cmd, "piri", &mut stdout),
-                Shell::Zsh => generate(shells::Zsh, &mut cmd, "piri", &mut stdout),
-                Shell::Fish => generate(shells::Fish, &mut cmd, "piri", &mut stdout),
-                Shell::PowerShell => generate(shells::PowerShell, &mut cmd, "piri", &mut stdout),
-                Shell::Elvish => generate(shells::Elvish, &mut cmd, "piri", &mut stdout),
+                CompletionShell::Bash => {
+                    generate(shells::Bash, &mut cmd, "piri", &mut io::stdout())
+                }
+                CompletionShell::Zsh => generate(shells::Zsh, &mut cmd, "piri", &mut io::stdout()),
+                CompletionShell::Fish => {
+                    generate(shells::Fish, &mut cmd, "piri", &mut io::stdout())
+                }
+                CompletionShell::PowerShell => {
+                    generate(shells::PowerShell, &mut cmd, "piri", &mut io::stdout())
+                }
+                CompletionShell::Elvish => {
+                    generate(shells::Elvish, &mut cmd, "piri", &mut io::stdout())
+                }
             }
         }
     }

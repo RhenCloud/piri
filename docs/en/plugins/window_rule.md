@@ -63,11 +63,11 @@ open_on_workspace = "browser"
 
 - **`app_id`** (optional): Regular expression pattern(s) to match window `app_id`. Can be a string or a list of strings. If a list is provided, any pattern that matches will trigger the rule.
 - **`title`** (optional): Regular expression pattern(s) to match window title. Can be a string or a list of strings. If a list is provided, any pattern that matches will trigger the rule.
-- **`open_on_workspace`** (optional): Target workspace identifier (name or index)
+- **`open_on_workspace`** (optional): Target workspace identifier (name or index), supports `workspace@output` format for specifying a monitor. Append `!` to lock the window to that workspace (e.g., `"1@eDP!"`)
 - **`focus_command`** (optional): Command to execute when the window gains focus
 - **`focus_command_once`** (optional, default: `false`): If set to `true`, the `focus_command` will only execute once globally for the rule, regardless of how many windows match it. See [issue #1](https://github.com/Asthestarsfalll/piri/issues/1) for more details.
 
-**Note**: 
+**Note**:
 - At least one of `app_id` or `title` must be specified
 - At least one of `open_on_workspace` or `focus_command` must be specified
 - If both `app_id` and `title` are specified, either match works (OR logic)
@@ -84,13 +84,48 @@ Supports two types:
 
 **Matching Order**: Name first, then idx.
 
+### Monitor-Specific Matching
+
+Use the `workspace@output` format to move windows to a workspace on a specific output:
+
+```toml
+# Move to workspace "2" on output "DP-1"
+[[window_rule]]
+app_id = "firefox"
+open_on_workspace = "2@DP-1"
+
+# Move to workspace "browser" on output "eDP-1"
+[[window_rule]]
+app_id = "chrome"
+open_on_workspace = "browser@eDP-1"
+```
+
 ## How It Works
 
-The plugin listens for `WindowOpenedOrChanged` events:
+The plugin listens for `WindowOpened` events:
 
 1. Uses configured regular expressions to match window `app_id` or `title`
 2. If matched, automatically moves the window to the specified workspace
 3. Rules are checked in configuration order, **the first matching rule is applied**
+4. If `open_on_workspace` ends with `!`, the window is locked to that workspace
+
+### Workspace Locking
+
+Append `!` to `open_on_workspace` to lock the window to the specified workspace, preventing it from being moved away manually:
+
+```toml
+# Lock to workspace 1 (eDP monitor)
+[[window_rule]]
+app_id = "firefox"
+open_on_workspace = "1@eDP!"
+
+# Lock to workspace named "dev"
+[[window_rule]]
+app_id = "^code$"
+open_on_workspace = "dev!"
+```
+
+Locked windows are checked on every attribute change; if they are not on the target workspace, they are automatically moved back.
 
 ## Features
 
@@ -98,6 +133,7 @@ The plugin listens for `WindowOpenedOrChanged` events:
 - ✅ **Flexible Matching**: Supports `app_id` or `title`, or both combined (OR logic)
 - ✅ **List Support**: `app_id` and `title` can be lists of patterns, any one match triggers the rule
 - ✅ **Regex Caching**: Compiled regular expressions are cached for better performance
+- ✅ **Workspace Locking** (`!` suffix): Prevents windows from being moved away
 - ✅ **Hot Config Reload**: Supports configuration updates without restarting the daemon
 
 ## focus_command_once Feature

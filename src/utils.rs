@@ -26,12 +26,12 @@ impl Throttle {
 
     /// Checks if enough time has passed since the last execution.
     /// If so, updates the last execution time and returns true.
+    /// Does NOT update the timestamp when throttled, so the next allowed
+    /// execution is not pushed further back by repeated throttled calls.
     pub fn check_and_update(&mut self, duration: Duration) -> bool {
         let now = Instant::now();
         if let Some(last) = self.last_execution {
             if now.duration_since(last) < duration {
-                // Update timestamp even when throttled to prevent bypass (matching existing logic in some places)
-                self.last_execution = Some(now);
                 return false;
             }
         }

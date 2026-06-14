@@ -4,7 +4,7 @@ Scratchpads allows you to quickly show and hide windows of frequently used appli
 
 ## Demo Video
 
-![Scratchpads Demo Video](../assets/scratchpads.mp4)
+https://github.com/user-attachments/assets/1c40d75b-310a-4503-9d59-92f0479a54d5
 
 ## Configuration
 
@@ -35,6 +35,22 @@ app_id = "imv"
 size = "60% 80%"
 margin = 50
 swallow_to_focus = true  # Automatically swallow into focused window when shown
+
+[scratchpads.note]
+direction = "fromTop"
+command = "gnome-text-editor"
+app_id = "org.gnome.TextEditor"
+size = "50% 40%"
+margin = 100
+sticky = true  # Follow focused workspace (handled by sticky plugin)
+
+[scratchpads.calc2]
+direction = "fromBottom"
+command = "gnome-calculator"
+app_id = "org.gnome.Calculator"
+size = "30% 40%"
+margin = 50
+auto_hide_on_focus_loss = true  # Auto-hide when window loses focus
 ```
 
 ### Configuration Parameters
@@ -49,6 +65,10 @@ swallow_to_focus = true  # Automatically swallow into focused window when shown
 - `size` (required): Window size in format `"width% height%"`
 - `margin` (required): Margin from screen edge in pixels
 - `swallow_to_focus` (optional): If `true`, when showing, the scratchpad window will be swallowed into the currently focused window. When hiding, the window will be set to floating first, then execute the normal hide logic. Defaults to `false`
+- `sticky` (optional): If `true`, the scratchpad window will follow the focused workspace (like sticky windows). This behavior is delegated to the sticky plugin via a global registry; scratchpads only registers the window. Defaults to `false`
+- `auto_hide_on_focus_loss` (optional): If `true`, the scratchpad window will automatically hide when it loses focus. Defaults to `false`
+
+> **Note**: `sticky` and `auto_hide_on_focus_loss` cannot both be enabled for the same scratchpad. Attempting to do so will result in a configuration error.
 
 > **Note**: `app_id` uses regular expression matching. If `app_id` contains special characters (such as `.`, `*`, etc.), they need to be escaped. For example: `app_id = "float\\.dropterm"`
 >
@@ -65,6 +85,8 @@ piri scratchpads {name} toggle
 piri scratchpads term toggle
 piri scratchpads calc toggle
 ```
+
+> **Note**: When toggling, if the target window is not in floating state (e.g., set to tiled mode), it will directly focus the window without executing show/hide animations. This is because scratchpad functionality only works with floating windows.
 
 ### Add Current Window
 
@@ -100,16 +122,22 @@ You can set global defaults in the `[piri.scratchpad]` section:
 
 1. **First Launch**: If the window doesn't exist, launches the application specified in the configuration
 2. **Window Registration**: After finding the window, sets it to floating mode and moves it off-screen
-3. **Show**: Moves the window to the currently focused output and workspace, positions it according to configured direction and size, and focuses the window
-4. **Hide**: Moves the window off-screen and intelligently restores previous focus
+3. **Toggle Check**: When executing toggle, if the window is not floating, directly focuses the window and returns immediately without animation
+4. **Show**: Moves the window to the currently focused output and workspace, positions it according to configured direction and size, and focuses the window
+5. **Hide**: Moves the window off-screen and intelligently restores previous focus
 
 **Cross-workspace and cross-monitor**: Regardless of which workspace or monitor the scratchpad window was originally on, it will automatically move to the currently focused location.
+
+> **Note**: Scratchpad functionality only works with floating windows. Features like `auto_hide_on_focus_loss` also only apply to floating windows. If a window is changed to tiled mode, toggle will only directly focus that window.
 
 ## Features
 
 - ✅ **Cross-workspace**: Quick access from any workspace
 - ✅ **Cross-monitor**: Automatically appears on the currently focused monitor
 - ✅ **Smart focus management**: Automatically focuses when showing, restores previous focus when hiding
+- ✅ **Non-floating window handling**: When toggling, if window is not floating, directly focus without animation
 - ✅ **Flexible configuration**: Customize window size, position, and animation direction
 - ✅ **Dynamic addition**: Quickly add the currently focused window as a scratchpad
 - ✅ **Swallow integration**: Support swallowing scratchpad window into the currently focused window (`swallow_to_focus` option)
+- ✅ **Sticky behavior**: Follow focused workspace via sticky plugin integration (`sticky` option)
+- ✅ **Auto-hide on focus loss**: Automatically hide when window loses focus (`auto_hide_on_focus_loss` option, only works with floating windows)

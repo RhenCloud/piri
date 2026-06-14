@@ -4,19 +4,43 @@
 
 ---
 
-Piri is a high-performance [Niri](https://github.com/YaLTeR/niri) extension tool built with Rust. It leverages efficient Niri IPC interaction and a unified event distribution mechanism to provide a robust, state-driven plugin system.
+Piri is a high-performance [Niri](https://github.com/YaLTeR/niri) compositor extension built with Rust, providing a robust state-driven plugin system via efficient IPC and unified event distribution.
 
 ## Core Plugins
 
 - 📦 **Scratchpads**: Intelligent hide/show windows. Supports auto-capturing existing windows or launching on-demand, following you seamlessly across workspaces and monitors (see [Scratchpads Docs](docs/en/plugins/scratchpads.md))
 - 🔌 **Empty**: Automation for empty workspaces. Automatically triggers preset commands when switching to an empty workspace to get you into the flow faster (see [Empty Docs](docs/en/plugins/empty.md))
 - 🎯 **Window Rule**: Powerful rule engine. Automatically places windows based on regex matching and provides focus-triggered command execution with a built-in de-duplication mechanism (see [Window Rule Docs](docs/en/plugins/window_rule.md))
-- 📐 **Workspace Rule**: Workspace window layout management. Provides automatic width adjustment, automatic tiling, automatic alignment, and automatic maximization. Integrates original Autofill functionality (see [Workspace Rule Docs](docs/en/plugins/workspace_rule.md))
+- 📐 **Workspace Rule**: Workspace window layout management. Provides automatic width adjustment, automatic tiling, automatic alignment, and automatic maximization. Integrates original Autofill functionality. Built-in EdgePulse indicators (see [Workspace Rule Docs](docs/en/plugins/workspace_rule.md), [EdgePulse](docs/en/plugins/edge_pulse.md))
 - 🔒 **Singleton**: Single-instance assurance. Ensures specific applications remain globally unique, supporting quick focus or automatic process launching (see [Singleton Docs](docs/en/plugins/singleton.md))
+- 📌 **Mark**: Named window marks for quick focus, in-memory bindings (see [Docs](docs/en/plugins/mark.md))
+- 📍 **Sticky**: Floating window follower with cross-monitor support (see [Docs](docs/en/plugins/sticky.md))
 - 📋 **Window Order**: Intelligent reordering. Automatically reorders tiled windows based on configured weights, preserving relative positions for identical weights to minimize movement (see [Window Order Docs](docs/en/plugins/window_order.md))
 - 🍽️ **Swallow**: Window swallowing mechanism. Automatically hides parent windows when child windows are opened, allowing child windows to replace parent windows in the layout (see [Swallow Docs](docs/en/plugins/swallow.md))
 - 😴 **Sleepy**: Presence sync. Automatically reports focused app status to your Sleepy server when focus changes (see [Sleepy Docs](docs/en/plugins/sleepy.md))
+- ⌨️ **Fcitx5**: Input method automation. Automatically switches input mode based on window focus (see [Fcitx5 Docs](docs/en/plugins/fcitx5.md))
 
+## Core Features
+
+- **High Performance with Rust**: Built with Rust, low memory footprint, async event handling
+- **Efficient IPC Communication**: Communicates with Niri compositor via Unix Socket, automatic reconnect, batch command execution
+- **Unified Event Distribution**: Single event listener receives all Niri events and distributes to plugins based on interest
+- **Fine-grained Event Splitting**: Automatically splits coarse-grained Niri events into `WindowOpened`, `WindowChanged`, `WindowToggleFloating` and other sub-events, so plugins don't need to track window state themselves (see [Docs](docs/en/event_normalization.md))
+- **State-driven Plugin System**: Each plugin implements a unified `Plugin` trait, supporting config hot-reload, event filtering, and IPC command handling
+- **Hot Config Reload**: Changes to `piri.toml` take effect immediately without restarting the daemon
+
+## Window Matching
+
+Piri uses a unified window matching mechanism: regex on `app_id` and/or `title`. Plugins such as `window_rule`, `singleton`, and `scratchpads` use it to find windows.
+
+**Supported matching**:
+- Full regular expression syntax
+- Match `app_id` and/or `title`
+- If both are set, **either** match can satisfy the rule (OR)
+
+> **Note**: The Window Rule plugin also supports list matching for `app_id` and `title`; see [Window Rule Docs](docs/en/plugins/window_rule.md).
+
+**Details**: [Window matching](docs/en/window_matching.md)
 
 ## Quick Start
 
@@ -27,7 +51,6 @@ Piri is a high-performance [Niri](https://github.com/YaLTeR/niri) extension tool
 The easiest way is to use the provided install script:
 
 ```bash
-# Run the install script
 ./install.sh
 ```
 
@@ -112,9 +135,9 @@ piri completion fish > ~/.config/fish/completions/piri.fish
 
 ### Scratchpads
 
-![Scratchpads](./assets/scratchpads.mp4)
+https://github.com/user-attachments/assets/1c40d75b-310a-4503-9d59-92f0479a54d5
 
-Quickly show and hide windows of frequently used applications. Supports cross-workspace and cross-monitor, so you can quickly access your scratchpad windows regardless of which workspace or monitor you're on. Features **dynamic window addition**, **automatic retention of manual size and margin adjustments**, **automatic moving to a specific workspace when hidden**, and **swallowing window into the currently focused window** (`swallow_to_focus` option).
+Quick show/hide windows, cross-workspace/monitor. Features: **dynamic addition**, **retains manual adjustments**, **auto-move on hide**, **swallow to focus** (`swallow_to_focus`), **sticky follow** (delegated to sticky plugin), **auto-hide on focus loss** (`auto_hide_on_focus_loss`, floating only), **non-floating direct focus**.
 
 **Configuration Example**:
 ```toml
@@ -140,7 +163,25 @@ app_id = "imv"
 size = "60% 80%"
 margin = 50
 swallow_to_focus = true  # Automatically swallow into focused window when shown
+
+[scratchpads.note]
+direction = "fromTop"
+command = "gnome-text-editor"
+app_id = "org.gnome.TextEditor"
+size = "50% 40%"
+margin = 100
+sticky = true  # Follow focused workspace (handled by sticky plugin)
+
+[scratchpads.calc]
+direction = "fromBottom"
+command = "gnome-calculator"
+app_id = "org.gnome.Calculator"
+size = "30% 40%"
+margin = 50
+auto_hide_on_focus_loss = true  # Auto-hide when window loses focus
 ```
+
+> **Note**: `sticky` and `auto_hide_on_focus_loss` cannot both be enabled for the same scratchpad.
 
 **Quick Usage**:
 ```bash
@@ -181,7 +222,7 @@ For detailed documentation, please refer to [Plugin System documentation](docs/e
 
 ### Window Rule
 
-Automatically move windows to specified workspaces based on their `app_id` or `title` using regular expression matching. This is very useful for automating window management, such as automatically assigning specific applications to specific workspaces.
+Regex-based window placement to specified workspaces, with focus-triggered command execution.
 
 > **Reference**: This functionality is similar to [Hyprland's window rules](https://wiki.hypr.land/Configuring/Window-Rules/).
 
@@ -229,21 +270,26 @@ open_on_workspace = "browser"
 ```
 
 **Features**:
-- Regular expression pattern matching support
-- Match by `app_id` or `title`, or both combined (OR logic)
-- Support for lists of patterns: `app_id` and `title` can be lists, any one match triggers the rule
-- Support workspace name or index matching
-- Focus-triggered command execution with built-in de-duplication mechanism
-- `focus_command_once` option: execute `focus_command` only once per rule globally (see [issue #1](https://github.com/Asthestarsfalll/piri/issues/1))
-- Pure event-driven, real-time response to window creation
+- Regex matching (`app_id`/`title`, lists supported, OR logic)
+- Workspace name/index matching
+- Workspace locking (`!` suffix), prevents windows from being moved away
+- Focus-triggered commands with de-duplication
+- `focus_command_once`: per-rule single execution ([issue #1](https://github.com/Asthestarsfalll/piri/issues/1))
+- Pure event-driven
 
 For detailed documentation, please refer to the [Window Rule documentation](docs/en/plugins/window_rule.md).
 
 ### Workspace Rule
 
-![Workspace Rule](./assets/autofill.mp4)
+https://github.com/user-attachments/assets/092a383c-993b-42b5-9b89-b78b0807b436
 
-Workspace window layout management plugin that provides automatic width adjustment, automatic tiling, automatic alignment, and automatic maximization. Integrates the original Autofill plugin functionality, providing comprehensive workspace window management capabilities.
+https://github.com/user-attachments/assets/b48b0465-0101-4298-9935-22f46d1a2658
+
+https://github.com/user-attachments/assets/3b8dc835-473c-4b6e-b684-02a6951b63f9
+
+https://github.com/user-attachments/assets/2e9e2c86-b9ef-44f1-a896-46473b93b417
+
+Workspace layout management: auto-width, tiling, alignment, maximization. Built-in EdgePulse edge indicators (animated) render visual hints when focused column reaches workspace edge.
 
 **Configuration Example**:
 ```toml
@@ -253,8 +299,17 @@ workspace_rule = true
 # Default configuration (applies to all workspaces)
 [piri.workspace_rule]
 auto_width = ["100%", "50%", "33.33%", "25%", "20%"]
-auto_fill = true  # Automatic alignment (original Autofill functionality)
+auto_fill = true  # Enable automatic alignment
 auto_maximize = true  # Automatic maximization
+
+# EdgePulse edge indicator (with animation support)
+[piri.workspace_rule.edge_pulse]
+enabled = true
+animation_enabled = true  # Enable animation
+animation_style = "pulse"  # "pulse" for breathing, "fade" for fade-in
+animation_duration = 600  # Animation cycle duration (milliseconds)
+animation_amplitude = 0.8  # Animation intensity
+animation_repeat = 3  # Repeat count per trigger (0 = infinite)
 
 # Workspace-specific configuration
 [workspace_rule.main]
@@ -268,71 +323,86 @@ auto_tile = true  # Automatic tiling
 **Features**:
 - Automatic width adjustment: Automatically adjust window widths based on window count
 - Automatic tiling: Automatically merge new windows into existing columns
-- Automatic alignment: Automatically align to rightmost position after closing windows (original Autofill functionality)
+- Automatic alignment: Automatically align to rightmost position after closing windows
 - Automatic maximization: Automatically maximize when only one window, unmaximize when multiple windows
+- EdgePulse edge indicators: Render visual hints when the focused column reaches the workspace edge
 - Workspace-aware: Each workspace can be configured independently
 - Flexible configuration: Supports default and workspace-specific configuration
-
-**Migration from Autofill**:
-```toml
-# Old configuration
-[piri.plugins]
-autofill = true
-
-# New configuration
-[piri.plugins]
-workspace_rule = true
-
-[piri.workspace_rule]
-auto_fill = true  # Enable original Autofill functionality
-```
 
 For detailed documentation, please refer to the [Workspace Rule documentation](docs/en/plugins/workspace_rule.md).
 
 ### Singleton
 
-Manages singleton windows - windows that should only have one instance. When you toggle a singleton, if the window already exists, it will focus it; otherwise, it will launch the application. This is useful for applications like browsers, terminals, or other tools where you typically only want one instance running.
-
-**Configuration Example**:
-```toml
-[piri.plugins]
-singleton = true
-
-[singleton.browser]
-command = "google-chrome-stable"
-
-[singleton.term]
-command = "GTK_IM_MODULE=wayland ghostty --class=singleton.term"
-app_id = "singleton.term"
-
-[singleton.editor]
-command = "code"
-app_id = "code"
-on_created_command = "notify-send 'Editor opened'"
-```
-
-**Quick Usage**:
-```bash
-# Toggle singleton (focus if exists, launch if not)
-piri singleton {name} toggle
-```
+Manages single-instance windows for global uniqueness. Toggle focuses existing or launches new. Ideal for browsers, terminals, etc.
 
 **Features**:
-- Smart window detection, automatically detects existing windows
-- Automatic App ID extraction, no manual specification needed
-- Window registry for fast lookup of existing windows
-- Automatically focuses existing windows, prevents duplicate instances
-- Supports executing custom commands after window creation (`on_created_command`)
+- Smart detection with auto App ID extraction
+- Window registry for fast lookup
+- Supports post-creation commands (`on_created_command`)
 
 For detailed documentation, please refer to the [Singleton documentation](docs/en/plugins/singleton.md).
 
+### Mark
+
+Assign **named marks** (e.g. letters `a`, `b`) to windows for quick focus. Marks are kept in the daemon’s memory and are **cleared when the daemon restarts**. You only enable the plugin in `piri.toml` and bind `spawn` commands in Niri for marks you use often.
+
+**Configuration example**:
+
+```toml
+[piri.plugins]
+mark = true
+```
+
+**Quick usage**:
+
+```bash
+# No valid binding: bind focused window to name; binding exists and window lives: focus it
+piri mark {name} toggle
+
+# Force-bind focused window to name (overwrites previous binding)
+piri mark {name} add
+
+# Remove this mark
+piri mark {name} delete
+```
+
+**Note**: Piri cannot capture the “next key” globally. To save shortcut slots, you can use a launcher (e.g. `fuzzel`) to pick a letter, then run the commands above. If Niri adds multi-key sequences or binding modes, you can group `piri mark …` calls under one prefix.
+
+For detailed documentation, see the [Mark documentation](docs/en/plugins/mark.md).
+
+### Sticky
+
+Pin floating window to follow focused workspace. Ideal for utility windows (dictionary, translator, logs, media control).
+
+**Configuration example**:
+
+```toml
+[piri.plugins]
+sticky = true
+```
+
+**Quick usage**:
+
+```bash
+# Set sticky (same-monitor follow only)
+piri sticky add
+
+# Set sticky (allow cross-monitor follow)
+piri sticky add --cross
+
+# Remove sticky binding
+piri sticky delete
+```
+
+For details, see the [Sticky documentation](docs/en/plugins/sticky.md).
+
 ### Window Order
 
-![Window Order - Manual Trigger](./assets/window_order.mp4)
+https://github.com/user-attachments/assets/2c9cbbb4-7001-44ce-acfd-afb51dfbc372
 
-![Window Order - Event-Driven Automatic Trigger](./assets/window_order_envent.mp4)
+https://github.com/user-attachments/assets/9818d478-3a33-456b-8367-548bb8ab7da7
 
-Automatically reorder windows in workspace based on configured priority weights. Larger weight values position windows further to the left.
+Weight-based window reordering. Larger weight = further left.
 
 **Configuration Example**:
 ```toml
@@ -357,19 +427,21 @@ piri window_order toggle
 ```
 
 **Features**:
-- Intelligent sorting algorithm that minimizes window moves
-- Supports manual trigger and event-driven automatic trigger
-- Supports workspace filtering (only for automatic trigger)
-- Preserves relative order for windows with same weight
-- Supports partial matching of `app_id`
+- Intelligent sorting, minimizes moves
+- Manual/event-driven trigger support
+- Workspace filtering
+- Preserves relative order for same weight
+- Supports `app_id` partial matching
 
 For detailed documentation, please refer to the [Window Order documentation](docs/en/plugins/window_order.md).
 
 ### Swallow
 
-![Swallow](./assets/autofill_1.mp4)
+https://github.com/user-attachments/assets/9968e97f-fdea-4211-a007-717edf703e93
 
-Automatically hides parent windows when child windows are opened, allowing child windows to replace parent windows in the layout. This is useful for scenarios like terminals spawning image viewers or media players.
+https://github.com/user-attachments/assets/51567d89-8ca8-4f4a-b2ca-732dfc0741c9
+
+Hides parent windows when child opens, replacing parent position. Ideal for terminal-spawned viewers/players.
 
 **Configuration Example**:
 ```toml
@@ -395,18 +467,18 @@ child_app_id = [".*preview.*", ".*markdown.*"]
 ```
 
 **Features**:
-- Supports PID-based parent-child process matching (enabled by default)
-- Supports rule-based matching (via `app_id`, `title`, or `pid` patterns)
-- Supports global and rule-level exclude rules
-- Intelligent focus window queue for automatic parent window discovery
-- Automatically handles workspace movement and floating window conversion
-- Smart floating window handling: Floating windows are not swallowed, but re-attempts swallowing when converting from floating to tiled
+- PID-based parent-child matching (default)
+- Rule-based matching (`app_id`/`title`/`pid`)
+- Global/rule-level exclude rules
+- Intelligent focus window queue
+- Auto-handles workspace movement and floating conversion
 
 For detailed documentation, please refer to the [Swallow documentation](docs/en/plugins/swallow.md).
 
 ## Documentation
 
 - [Architecture](docs/en/architecture.md) - Project architecture and how it works
+- [Fine-grained Event Splitting](docs/en/event_normalization.md) - Event splitting mechanism explained
 - [Plugin System](docs/en/plugins/plugins.md) - Detailed plugin system documentation
 - [Development Guide](docs/en/development.md) - Development, extension, and contribution guide
 

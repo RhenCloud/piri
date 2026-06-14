@@ -19,6 +19,22 @@ pub enum IpcRequest {
         name: String,
     },
     WindowOrderToggle,
+    /// Mark: focus if bound window exists, else bind current focus to `name`.
+    MarkToggle {
+        name: String,
+    },
+    /// Remove mark `name` (no-op if missing).
+    MarkDelete {
+        name: String,
+    },
+    /// Bind current focus to `name`, replacing any previous binding.
+    MarkAdd {
+        name: String,
+    },
+    StickyAdd {
+        cross: bool,
+    },
+    StickyDelete,
     Ping,
     Shutdown,
 }
@@ -247,9 +263,9 @@ pub async fn handle_request(
                     // Check if singleton plugin should be enabled but isn't
                     let config = handler.config();
                     if config.piri.plugins.is_enabled("singleton") {
-                        IpcResponse::Error(format!("Singleton plugin is enabled but not initialized. Please restart the daemon."))
+                        IpcResponse::Error("Singleton plugin is enabled but not initialized. Please restart the daemon.".to_string())
                     } else {
-                        IpcResponse::Error(format!("Singleton plugin is not enabled. Please enable it in the configuration file (piri.plugins.singleton = true)."))
+                        IpcResponse::Error("Singleton plugin is not enabled. Please enable it in the configuration file (piri.plugins.singleton = true).".to_string())
                     }
                 }
                 IpcRequest::WindowOrderToggle => {
@@ -259,6 +275,36 @@ pub async fn handle_request(
                         IpcResponse::Error("WindowOrder plugin is enabled but not initialized. Please restart the daemon.".to_string())
                     } else {
                         IpcResponse::Error("WindowOrder plugin is not enabled. Please enable it in the configuration file (piri.plugins.window_order = true).".to_string())
+                    }
+                }
+                IpcRequest::MarkToggle { .. }
+                | IpcRequest::MarkDelete { .. }
+                | IpcRequest::MarkAdd { .. } => {
+                    let config = handler.config();
+                    if config.piri.plugins.is_enabled("mark") {
+                        IpcResponse::Error(
+                            "Mark plugin is enabled but not initialized. Please restart the daemon."
+                                .to_string(),
+                        )
+                    } else {
+                        IpcResponse::Error(
+                            "Mark plugin is not enabled. Set piri.plugins.mark = true in the config."
+                                .to_string(),
+                        )
+                    }
+                }
+                IpcRequest::StickyAdd { .. } | IpcRequest::StickyDelete => {
+                    let config = handler.config();
+                    if config.piri.plugins.is_enabled("sticky") {
+                        IpcResponse::Error(
+                            "Sticky plugin is enabled but not initialized. Please restart the daemon."
+                                .to_string(),
+                        )
+                    } else {
+                        IpcResponse::Error(
+                            "Sticky plugin is not enabled. Set piri.plugins.sticky = true in the config."
+                                .to_string(),
+                        )
                     }
                 }
             }

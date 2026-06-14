@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
@@ -9,34 +11,37 @@ use crate::plugins::empty::EmptyPluginConfig;
 /// Direction from which the scratchpad appears
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
-    FromTop,
-    FromBottom,
-    FromLeft,
-    FromRight,
+    Top,
+    Bottom,
+    Left,
+    Right,
 }
 
-impl Direction {
-    /// Convert string to Direction
-    pub fn from_str(s: &str) -> Result<Self> {
+impl std::str::FromStr for Direction {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         match s {
-            "fromTop" => Ok(Direction::FromTop),
-            "fromBottom" => Ok(Direction::FromBottom),
-            "fromLeft" => Ok(Direction::FromLeft),
-            "fromRight" => Ok(Direction::FromRight),
+            "fromTop" => Ok(Direction::Top),
+            "fromBottom" => Ok(Direction::Bottom),
+            "fromLeft" => Ok(Direction::Left),
+            "fromRight" => Ok(Direction::Right),
             _ => anyhow::bail!(
                 "Invalid direction: {}. Must be one of: fromTop, fromBottom, fromLeft, fromRight",
                 s
             ),
         }
     }
+}
 
+impl Direction {
     /// Convert Direction to string
     pub fn as_str(&self) -> &'static str {
         match self {
-            Direction::FromTop => "fromTop",
-            Direction::FromBottom => "fromBottom",
-            Direction::FromLeft => "fromLeft",
-            Direction::FromRight => "fromRight",
+            Direction::Top => "fromTop",
+            Direction::Bottom => "fromBottom",
+            Direction::Left => "fromLeft",
+            Direction::Right => "fromRight",
         }
     }
 }
@@ -56,11 +61,11 @@ impl<'de> Deserialize<'de> for Direction {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Direction::from_str(&s).map_err(serde::de::Error::custom)
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub niri: NiriConfig,
@@ -130,19 +135,13 @@ impl Default for SwallowSection {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NiriConfig {
     /// Path to niri socket (default: $XDG_RUNTIME_DIR/niri or /tmp/niri)
     pub socket_path: Option<String>,
 }
 
-impl Default for NiriConfig {
-    fn default() -> Self {
-        Self { socket_path: None }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PiriConfig {
     #[serde(default)]
     pub scratchpad: ScratchpadDefaults,
@@ -154,21 +153,18 @@ pub struct PiriConfig {
     pub swallow: SwallowSection,
     #[serde(default)]
     pub workspace_rule: WorkspaceRuleSection,
+    #[serde(default)]
+    pub mark: MarkSection,
 }
 
-impl Default for PiriConfig {
-    fn default() -> Self {
-        Self {
-            scratchpad: ScratchpadDefaults::default(),
-            plugins: PluginsConfig::default(),
-            window_order: WindowOrderSection::default(),
-            swallow: SwallowSection::default(),
-            workspace_rule: WorkspaceRuleSection::default(),
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MarkSection {
+    /// If true, toggling a mark that is already focused will return to the previous window
+    #[serde(default)]
+    pub refocus: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PluginsConfig {
     #[serde(default)]
     pub scratchpads: Option<bool>,
@@ -190,26 +186,12 @@ pub struct PluginsConfig {
     pub fcitx5: Option<bool>,
     #[serde(default)]
     pub sleepy: Option<bool>,
+    #[serde(default)]
+    pub mark: Option<bool>,
+    #[serde(default)]
+    pub sticky: Option<bool>,
     #[serde(rename = "empty_config", default)]
     pub empty_config: Option<EmptyPluginConfig>,
-}
-
-impl Default for PluginsConfig {
-    fn default() -> Self {
-        Self {
-            scratchpads: None,
-            empty: None,
-            window_rule: None,
-            autofill: None,
-            singleton: None,
-            window_order: None,
-            swallow: None,
-            workspace_rule: None,
-            fcitx5: None,
-            sleepy: None,
-            empty_config: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,6 +304,15 @@ pub struct ScratchpadConfig {
     /// If true, swallow the scratchpad window to the focused window when shown
     #[serde(default)]
     pub swallow_to_focus: bool,
+    /// If true, scratchpad will follow the focused workspace (delegated to sticky plugin)
+    #[serde(default)]
+    pub sticky: bool,
+    /// If true, scratchpad will automatically hide when it loses focus
+    #[serde(default)]
+    pub auto_hide_on_focus_loss: bool,
+    /// If true, when the scratchpad is visible and focused, toggle will refocus to the previous window
+    #[serde(default)]
+    pub refocus: bool,
 }
 
 impl ScratchpadConfig {
@@ -391,6 +382,8 @@ impl PluginsConfig {
             "workspace_rule" => self.workspace_rule.unwrap_or(false),
             "fcitx5" => self.fcitx5.unwrap_or(false),
             "sleepy" => self.sleepy.unwrap_or(false),
+            "mark" => self.mark.unwrap_or(false),
+            "sticky" => self.sticky.unwrap_or(false),
             _ => false,
         }
     }
@@ -459,10 +452,13 @@ pub struct WorkspaceRuleConfig {
     /// If true, automatically maximize window when there's only one window, and unmaximize when there are multiple windows
     #[serde(default)]
     pub auto_maximize: bool,
+    /// EdgePulse indicator config for this workspace.
+    #[serde(default)]
+    pub edge_pulse: EdgePulseConfig,
 }
 
 /// Workspace rule section in piri config (default settings)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceRuleSection {
     /// Default auto width configuration
     #[serde(deserialize_with = "deserialize_auto_width", default)]
@@ -476,35 +472,124 @@ pub struct WorkspaceRuleSection {
     /// If true, automatically maximize window when there's only one window, and unmaximize when there are multiple windows
     #[serde(default)]
     pub auto_maximize: bool,
+    /// Default EdgePulse indicator config for all workspaces.
+    #[serde(default)]
+    pub edge_pulse: EdgePulseConfig,
 }
 
-impl Default for WorkspaceRuleSection {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdgePulseConfig {
+    /// Enable left/right missing-neighbor indicator.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Show left-side indicator when there is no left neighbor.
+    #[serde(default = "default_true")]
+    pub show_left: bool,
+    /// Show right-side indicator when there is no right neighbor.
+    #[serde(default = "default_true")]
+    pub show_right: bool,
+    /// Indicator width in pixels.
+    #[serde(default = "default_edge_pulse_width")]
+    pub width: u32,
+    /// Indicator height ratio to output height, range 0.0-1.0.
+    #[serde(default = "default_edge_pulse_height_ratio")]
+    pub height_ratio: f64,
+    /// Gradient start color for left edge.
+    #[serde(default = "default_left_start")]
+    pub left_gradient_start: String,
+    /// Gradient end color for left edge.
+    #[serde(default = "default_left_end")]
+    pub left_gradient_end: String,
+    /// Gradient start color for right edge.
+    #[serde(default = "default_right_start")]
+    pub right_gradient_start: String,
+    /// Gradient end color for right edge.
+    #[serde(default = "default_right_end")]
+    pub right_gradient_end: String,
+    /// Global alpha 0.0-1.0.
+    #[serde(default = "default_edge_pulse_alpha")]
+    pub alpha: f64,
+    /// Enable animation effect (pulse/fade).
+    #[serde(default)]
+    pub animation_enabled: bool,
+    /// Animation style: "pulse" | "fade".
+    #[serde(default = "default_animation_style")]
+    pub animation_style: String,
+    /// Animation duration in milliseconds per cycle.
+    #[serde(default = "default_animation_duration")]
+    pub animation_duration: f64,
+    /// Animation amplitude 0.0-1.0, controls intensity.
+    #[serde(default = "default_animation_amplitude")]
+    pub animation_amplitude: f64,
+    /// Number of animation repeats (0 = infinite loop until state changes).
+    #[serde(default = "default_animation_repeat")]
+    pub animation_repeat: u32,
+}
+
+impl Default for EdgePulseConfig {
     fn default() -> Self {
         Self {
-            auto_width: Vec::new(),
-            auto_tile: false,
-            auto_fill: false,
-            auto_maximize: false,
+            enabled: false,
+            show_left: true,
+            show_right: true,
+            width: default_edge_pulse_width(),
+            height_ratio: default_edge_pulse_height_ratio(),
+            left_gradient_start: default_left_start(),
+            left_gradient_end: default_left_end(),
+            right_gradient_start: default_right_start(),
+            right_gradient_end: default_right_end(),
+            alpha: default_edge_pulse_alpha(),
+            animation_enabled: false,
+            animation_style: default_animation_style(),
+            animation_duration: default_animation_duration(),
+            animation_amplitude: default_animation_amplitude(),
+            animation_repeat: default_animation_repeat(),
         }
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            niri: NiriConfig::default(),
-            piri: PiriConfig::default(),
-            scratchpads: HashMap::new(),
-            empty: HashMap::new(),
-            singleton: HashMap::new(),
-            window_rule: Vec::new(),
-            window_order: HashMap::new(),
-            swallow: Vec::new(),
-            workspace_rule: HashMap::new(),
-            fcitx5: Vec::new(),
-            sleepy: None,
-        }
-    }
+fn default_edge_pulse_width() -> u32 {
+    14
+}
+
+fn default_edge_pulse_height_ratio() -> f64 {
+    0.42
+}
+
+fn default_edge_pulse_alpha() -> f64 {
+    0.85
+}
+
+fn default_animation_style() -> String {
+    "pulse".to_string()
+}
+
+fn default_animation_duration() -> f64 {
+    600.0
+}
+
+fn default_animation_amplitude() -> f64 {
+    0.8
+}
+
+fn default_animation_repeat() -> u32 {
+    3
+}
+
+fn default_left_start() -> String {
+    "#68d8ff".to_string()
+}
+
+fn default_left_end() -> String {
+    "#1f4fff".to_string()
+}
+
+fn default_right_start() -> String {
+    "#ffd36a".to_string()
+}
+
+fn default_right_end() -> String {
+    "#ff7a1f".to_string()
 }
 
 // Helper to convert TOML table to ScratchpadConfig
@@ -516,7 +601,7 @@ impl TryFrom<toml::Table> for ScratchpadConfig {
             .get("direction")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing 'direction' field"))
-            .and_then(|s| Direction::from_str(s))?;
+            .and_then(Direction::from_str)?;
 
         let command = table
             .get("command")
@@ -544,6 +629,19 @@ impl TryFrom<toml::Table> for ScratchpadConfig {
         let swallow_to_focus =
             table.get("swallow_to_focus").and_then(|v| v.as_bool()).unwrap_or(false);
 
+        let sticky = table.get("sticky").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let auto_hide_on_focus_loss =
+            table.get("auto_hide_on_focus_loss").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let refocus = table.get("refocus").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        if sticky && auto_hide_on_focus_loss {
+            anyhow::bail!(
+                "'sticky' and 'auto_hide_on_focus_loss' cannot both be enabled for a scratchpad"
+            );
+        }
+
         Ok(ScratchpadConfig {
             direction,
             command,
@@ -551,6 +649,9 @@ impl TryFrom<toml::Table> for ScratchpadConfig {
             size,
             margin,
             swallow_to_focus,
+            sticky,
+            auto_hide_on_focus_loss,
+            refocus,
         })
     }
 }

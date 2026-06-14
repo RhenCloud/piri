@@ -180,4 +180,3 @@ open_on_workspace = "1"
 title = ".*GitHub.*"
 open_on_workspace = "dev"
 ```
-

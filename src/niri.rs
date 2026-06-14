@@ -4,10 +4,9 @@ use niri_ipc::{
     WorkspaceReferenceArg,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
 
 use crate::utils::send_notification;
 
@@ -19,7 +18,8 @@ pub struct NiriIpc {
 
 struct NiriIpcInner {
     socket_path: Mutex<Option<PathBuf>>,
-    socket: tokio::sync::Mutex<Option<Socket>>,
+    socket: Mutex<Option<Socket>>,
+    outputs: Mutex<HashMap<String, niri_ipc::Output>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,18 +76,23 @@ pub struct OutputLogical {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
+    pub id: u64,
+    pub idx: u8,
     pub name: String,
+    pub output: Option<String>,
     pub focused: bool,
 }
 
 impl NiriIpc {
     pub fn new(socket_path: Option<String>) -> Self {
-        let path = socket_path.map(PathBuf::from);
+        let map = socket_path.map(PathBuf::from);
+        let path = map;
 
         Self {
             inner: Arc::new(NiriIpcInner {
                 socket_path: Mutex::new(path),
-                socket: tokio::sync::Mutex::new(None),
+                socket: Mutex::new(None),
+                outputs: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -95,7 +100,7 @@ impl NiriIpc {
     /// Update socket path and clear existing connection if it changed
     pub fn update_socket_path(&self, socket_path: Option<String>) {
         let new_path = socket_path.map(PathBuf::from);
-        let mut path_guard = self.inner.socket_path.lock().unwrap();
+        let mut path_guard = self.inner.socket_path.lock().unwrap_or_else(|e| e.into_inner());
         if *path_guard != new_path {
             log::info!(
                 "Niri socket path changed: {:?} -> {:?}",
@@ -103,16 +108,14 @@ impl NiriIpc {
                 new_path
             );
             *path_guard = new_path;
-            if let Ok(mut socket_guard) = self.inner.socket.try_lock() {
-                *socket_guard = None;
-            }
+            let mut socket_guard = self.inner.socket.lock().unwrap_or_else(|e| e.into_inner());
+            *socket_guard = None;
         }
     }
 
     /// Connect to niri socket
     fn connect_internal(&self) -> Result<Socket> {
-        let path_guard =
-            self.inner.socket_path.lock().map_err(|_| anyhow::anyhow!("Mutex poisoned"))?;
+        let path_guard = self.inner.socket_path.lock().unwrap_or_else(|e| e.into_inner());
         let socket = if let Some(ref path) = *path_guard {
             Socket::connect_to(path).context("Failed to connect to niri socket")?
         } else {
@@ -124,28 +127,30 @@ impl NiriIpc {
     /// Helper to send a request and get a response
     pub async fn send_request(&self, request: Request) -> Result<Response> {
         let niri = self.clone();
-        let mut guard = niri.inner.socket.lock().await;
-
-        if guard.is_none() {
-            *guard = Some(niri.connect_internal()?);
-        }
-
-        let socket = guard.as_mut().unwrap();
-        let request_clone = request.clone();
-
-        match socket.send(request) {
-            Ok(Reply::Ok(response)) => Ok(response),
-            Ok(Reply::Err(err)) => anyhow::bail!("niri-ipc error: {}", err),
-            Err(_) => {
-                // Try to reconnect once if send fails
+        tokio::task::spawn_blocking(move || -> Result<Response> {
+            let mut guard = niri.inner.socket.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.is_none() {
                 *guard = Some(niri.connect_internal()?);
-                let socket = guard.as_mut().unwrap();
-                match socket.send(request_clone)? {
-                    Reply::Ok(response) => Ok(response),
-                    Reply::Err(err) => anyhow::bail!("niri-ipc error: {}", err),
+            }
+            let socket = guard.as_mut().unwrap();
+
+            let request_clone = request.clone();
+
+            match socket.send(request) {
+                Ok(Reply::Ok(response)) => Ok(response),
+                Ok(Reply::Err(err)) => anyhow::bail!("niri-ipc error: {}", err),
+                Err(_) => {
+                    *guard = Some(niri.connect_internal()?);
+                    let socket = guard.as_mut().unwrap();
+                    match socket.send(request_clone)? {
+                        Reply::Ok(response) => Ok(response),
+                        Reply::Err(err) => anyhow::bail!("niri-ipc error: {}", err),
+                    }
                 }
             }
-        }
+        })
+        .await
+        .context("Task join error")?
     }
 
     /// Helper to send an action and expect Ok
@@ -162,29 +167,68 @@ impl NiriIpc {
         T: Send + 'static,
     {
         let niri = self.clone();
-        let mut guard = niri.inner.socket.lock().await;
+        tokio::task::spawn_blocking(move || {
+            let mut guard = niri.inner.socket.lock().unwrap_or_else(|e| e.into_inner());
 
-        // Ensure we have a connection
-        if guard.is_none() {
-            *guard = Some(niri.connect_internal()?);
-        }
+            // Ensure we have a connection
+            if guard.is_none() {
+                *guard = Some(niri.connect_internal()?);
+            }
 
-        let res = {
-            let socket = guard.as_mut().unwrap();
-            f(socket)
-        };
+            let res = {
+                let socket = guard.as_mut().unwrap();
+                f(socket)
+            };
 
-        if res.is_ok() {
-            res
-        } else {
-            // On error, try to reconnect once and retry the whole batch
-            *guard = Some(niri.connect_internal()?);
-            let socket = guard.as_mut().unwrap();
-            f(socket)
+            if res.is_ok() {
+                res
+            } else {
+                // On error, try to reconnect once and retry the whole batch
+                *guard = Some(niri.connect_internal()?);
+                let socket = guard.as_mut().unwrap();
+                f(socket)
+            }
+        })
+        .await
+        .context("Task join error")?
+    }
+
+    /// Get all windows (raw, without workspace name mapping)
+    /// Use this when you only need window id, app_id, title, pid, workspace_id, etc.
+    /// and don't need the human-readable workspace name field.
+    pub async fn get_windows_raw(&self) -> Result<Vec<Window>> {
+        match self.send_request(Request::Windows).await? {
+            Response::Windows(niri_windows) => {
+                let windows: Vec<Window> = niri_windows
+                    .into_iter()
+                    .map(|w| Window {
+                        id: w.id,
+                        title: w.title.unwrap_or_default(),
+                        app_id: w.app_id,
+                        class: None,
+                        floating: w.is_floating,
+                        workspace_id: w.workspace_id,
+                        workspace: None,
+                        output: None,
+                        layout: Some(WindowLayout {
+                            tile_pos: w.layout.tile_pos_in_workspace_view.map(|(x, y)| [x, y]),
+                            window_size: Some([
+                                w.layout.window_size.0 as u32,
+                                w.layout.window_size.1 as u32,
+                            ]),
+                            pos_in_scrolling_layout: w.layout.pos_in_scrolling_layout,
+                        }),
+                        pid: w.pid.map(|p| p as u32),
+                    })
+                    .collect();
+                Ok(windows)
+            }
+            _ => anyhow::bail!("Unexpected response type for Windows request"),
         }
     }
 
-    /// Get all windows
+    /// Get all windows with workspace name mapping
+    /// Use this when you need the workspace field (human-readable name/index).
     pub async fn get_windows(&self) -> Result<Vec<Window>> {
         match self.send_request(Request::Windows).await? {
             Response::Windows(niri_windows) => {
@@ -204,11 +248,11 @@ impl NiriIpc {
                             id: w.id,
                             title: w.title.unwrap_or_default(),
                             app_id: w.app_id,
-                            class: None, // niri_ipc::Window doesn't have class field
+                            class: None,
                             floating: w.is_floating,
                             workspace_id: w.workspace_id,
                             workspace,
-                            output: None, // niri_ipc::Window doesn't have output field directly
+                            output: None,
                             layout: Some(WindowLayout {
                                 tile_pos: w.layout.tile_pos_in_workspace_view.map(|(x, y)| [x, y]),
                                 window_size: Some([
@@ -300,7 +344,10 @@ impl NiriIpc {
                     if workspace.is_focused {
                         // Use idx field as workspace identifier
                         return Ok(Workspace {
+                            id: workspace.id,
+                            idx: workspace.idx,
                             name: workspace.idx.to_string(),
+                            output: workspace.output.clone(),
                             focused: true,
                         });
                     }
@@ -311,13 +358,19 @@ impl NiriIpc {
                 for window in windows {
                     if let Some(workspace) = &window.workspace {
                         return Ok(Workspace {
+                            id: window.workspace_id.unwrap_or(0),
+                            idx: 0,
                             name: workspace.clone(),
+                            output: None,
                             focused: true,
                         });
                     }
                     if let Some(workspace_id) = window.workspace_id {
                         return Ok(Workspace {
+                            id: workspace_id,
+                            idx: 0,
                             name: workspace_id.to_string(),
+                            output: None,
                             focused: true,
                         });
                     }
@@ -325,7 +378,10 @@ impl NiriIpc {
 
                 // Final fallback to default workspace
                 Ok(Workspace {
+                    id: 0,
+                    idx: 1,
                     name: "1".to_string(),
+                    output: None,
                     focused: true,
                 })
             }
@@ -445,23 +501,23 @@ impl NiriIpc {
     }
 
     /// Resize floating window using set-window-width and set-window-height
+    /// Sends both operations in a single blocking task for lower latency.
     pub async fn resize_floating_window(
         &self,
         window_id: u64,
         width: u32,
         height: u32,
     ) -> Result<()> {
-        // Set window width
-        self.send_action(Action::SetWindowWidth {
-            id: Some(window_id),
-            change: SizeChange::SetFixed(width as i32),
-        })
-        .await?;
-
-        // Set window height
-        self.send_action(Action::SetWindowHeight {
-            id: Some(window_id),
-            change: SizeChange::SetFixed(height as i32),
+        self.execute_batch(move |socket| {
+            let _ = socket.send(Request::Action(Action::SetWindowWidth {
+                id: Some(window_id),
+                change: SizeChange::SetFixed(width as i32),
+            }))?;
+            let _ = socket.send(Request::Action(Action::SetWindowHeight {
+                id: Some(window_id),
+                change: SizeChange::SetFixed(height as i32),
+            }))?;
+            Ok::<(), anyhow::Error>(())
         })
         .await
     }
@@ -483,6 +539,27 @@ impl NiriIpc {
             )
         })?;
         Ok((logical.width, logical.height))
+    }
+
+    /// Get the output size for a specific output by name (from cache, sync)
+    pub fn get_output_size_by_name(&self, output_name: &str) -> Option<(u32, u32)> {
+        let outputs = self.inner.outputs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(output) = outputs.get(output_name) {
+            if let Some(ref logical) = output.logical {
+                return Some((logical.width, logical.height));
+            }
+        }
+        None
+    }
+
+    /// Refresh outputs cache from niri IPC (call on startup and on output change events)
+    pub async fn refresh_outputs(&self) -> Result<()> {
+        let outputs = match self.send_request(Request::Outputs).await? {
+            Response::Outputs(outputs) => outputs,
+            _ => anyhow::bail!("Unexpected response type for Outputs request"),
+        };
+        *self.inner.outputs.lock().unwrap_or_else(|e| e.into_inner()) = outputs;
+        Ok(())
     }
     /// Returns (x, y, width, height) if available
     /// For floating windows, extracts position from layout.tile_pos_in_workspace_view
@@ -522,53 +599,18 @@ impl NiriIpc {
         self.get_window_position(window_id).await
     }
 
-    /// Open an async event stream reader for niri events.
-    ///
-    /// Unlike `socket::Socket::read_events()`, this keeps parsing control in our code
-    /// so we can handle empty lines and malformed payloads without forcing reconnects.
-    pub async fn open_event_stream_async(&self) -> Result<BufReader<UnixStream>> {
-        let path_opt = self
-            .inner
-            .socket_path
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Mutex poisoned"))?
-            .clone();
+    /// Create a socket connected to the niri event stream.
+    /// Returns a plain niri_ipc::Socket whose read_events() iterator yields events.
+    pub fn create_event_stream_socket(&self) -> Result<Socket> {
+        let mut socket = self.connect_internal()?;
 
-        let path = if let Some(path) = path_opt {
-            path
-        } else {
-            std::env::var_os(niri_ipc::socket::SOCKET_PATH_ENV)
-                .map(PathBuf::from)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "{} is not set, are you running this within niri?",
-                        niri_ipc::socket::SOCKET_PATH_ENV
-                    )
-                })?
-        };
-
-        let mut stream = UnixStream::connect(&path)
-            .await
-            .with_context(|| format!("Failed to connect to niri socket: {}", path.display()))?;
-
-        let mut req = serde_json::to_string(&Request::EventStream)?;
-        req.push('\n');
-        stream.write_all(req.as_bytes()).await?;
-
-        let mut reader = BufReader::new(stream);
-        let mut reply_line = String::new();
-        let n = reader.read_line(&mut reply_line).await?;
-        if n == 0 {
-            anyhow::bail!("niri closed socket before replying to EventStream request");
+        match socket.send(Request::EventStream)? {
+            Reply::Ok(_) => {}
+            Reply::Err(err) => {
+                anyhow::bail!("Failed to request event stream: {}", err);
+            }
         }
 
-        let reply: Reply = serde_json::from_str(reply_line.trim())
-            .context("Failed to parse EventStream handshake reply")?;
-
-        match reply {
-            Reply::Ok(Response::Handled) => Ok(reader),
-            Reply::Ok(other) => anyhow::bail!("Unexpected EventStream reply: {:?}", other),
-            Reply::Err(err) => anyhow::bail!("Failed to request event stream: {}", err),
-        }
+        Ok(socket)
     }
 }

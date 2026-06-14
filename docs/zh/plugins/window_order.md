@@ -11,7 +11,7 @@ window_order = true
 [piri.window_order]
 enable_event_listener = true  # 启用事件监听，自动重排
 default_weight = 0           # 未配置窗口的默认权重
-# workspaces = ["1", "2", "dev"]  # 可选：仅在指定工作区应用（空列表 = 所有工作区）
+# workspaces = ["1", "2@DP-1", "dev@eDP-1"]  # 可选：仅在指定工作区应用（空列表 = 所有工作区）
 
 [window_order]
 google-chrome = 100
@@ -23,7 +23,7 @@ ghostty = 70
 
 - `enable_event_listener`: 是否启用事件监听。启用后，窗口布局改变或新窗口打开时会自动重排（仅在配置的 `workspaces` 中生效）
 - `default_weight`: 未在 `[window_order]` 中配置的窗口的默认权重值
-- `workspaces`: 可选，指定在哪些工作区应用窗口排序。可以是工作区名称或索引（字符串数组）。如果为空或不指定，则应用到所有工作区
+- `workspaces`: 可选，指定在哪些工作区应用窗口排序。可以是工作区名称、索引或 `name@output` 格式（字符串数组）。如果为空或不指定，则应用到所有工作区
 - `[window_order]`: 窗口权重配置表，键为窗口的 `app_id`，值为权重（数值越大越靠左）
 
 ### 权重匹配规则
@@ -50,7 +50,7 @@ piri window_order toggle
 
 **注意**：手动触发可以在任意工作区执行，不受 `workspaces` 配置限制。
 
-![Window Order - 手动触发](../../assets/window_order.mp4)
+https://github.com/user-attachments/assets/2c9cbbb4-7001-44ce-acfd-afb51dfbc372
 
 ### 自动触发
 
@@ -61,7 +61,7 @@ piri window_order toggle
 
 **注意**：自动触发仅在配置的 `workspaces` 列表中执行。如果未配置 `workspaces` 或列表为空，则应用到所有工作区。
 
-![Window Order - 事件监听自动触发](../../assets/window_order_envent.mp4)
+https://github.com/user-attachments/assets/9818d478-3a33-456b-8367-548bb8ab7da7
 
 ## 工作原理
 
@@ -102,4 +102,4 @@ piri window_order toggle
    - **自动触发**：仅在配置的 `workspaces` 列表中执行。如果未配置或为空，则应用到所有工作区
 3. **权重值越大越靠左**: 权重值 100 的窗口会在权重值 80 的窗口左侧
 4. **相同权重保持顺序**: 相同权重的窗口不会改变相对顺序，以减少不必要的移动
-5. **工作区匹配**: `workspaces` 支持工作区名称或索引（字符串格式），例如 `["1", "2", "dev"]`
+5. **工作区匹配**: `workspaces` 支持工作区名称、索引或 `workspace@output` 格式（字符串），例如 `["1", "2@DP-1", "dev@eDP-1"]`。`@output` 部分支持显示器前缀匹配（`"2@DP"` 可匹配 `DP-1`、`DP-2` 等）

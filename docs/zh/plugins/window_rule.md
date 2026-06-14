@@ -1,6 +1,6 @@
 # Window Rule 插件
 
-Window Rule 插件根据窗口的 `app_id` 或 `title` 使用正则表达式匹配，自动将窗口移动到指定的 workspace。
+基于正则匹配自动归位窗口至指定 workspace，支持焦点触发命令。
 
 ## 配置
 
@@ -61,17 +61,32 @@ open_on_workspace = "browser"
 
 ## 配置字段
 
-- **`app_id`** (可选): 用于匹配窗口 `app_id` 的正则表达式。可以是单个字符串或字符串列表。如果提供列表，任意一个模式匹配即可触发规则。
-- **`title`** (可选): 用于匹配窗口标题的正则表达式。可以是单个字符串或字符串列表。如果提供列表，任意一个模式匹配即可触发规则。
-- **`open_on_workspace`** (可选): 目标 workspace 标识符（名称或索引，详见下方说明）
-- **`focus_command`** (可选): 当窗口获得焦点时执行的命令
-- **`focus_command_once`** (可选，默认: `false`): 如果设置为 `true`，`focus_command` 将仅对该规则全局执行一次，无论有多少窗口匹配该规则。更多详情请参阅 [issue #1](https://github.com/Asthestarsfalll/piri/issues/1)。
+- `app_id` (可选): 正则匹配窗口 `app_id`，支持字符串或列表（OR 逻辑）
+- `title` (可选): 正则匹配窗口标题，支持字符串或列表（OR 逻辑）
+- `open_on_workspace` (可选): 目标 workspace（名称/索引），支持 `workspace@output` 格式指定显示器。末尾加 `!` 可将窗口锁定在该 workspace（如 `"1@eDP!"`）
+- `focus_command` (可选): 窗口获焦时执行命令
+- `focus_command_once` (默认 `false`): 规则级单次执行（[issue #1](https://github.com/Asthestarsfalll/piri/issues/1)）
 
-**注意**: 
-- 至少需要指定 `app_id` 或 `title` 中的一个
-- 至少需要指定 `open_on_workspace` 或 `focus_command` 中的一个
-- 如果同时指定 `app_id` 和 `title`，则任一匹配即可（OR 逻辑）
-- `app_id` 和 `title` 可以是单个字符串或字符串列表。当提供列表时，列表中任意一个模式匹配即可触发规则
+**注意**:
+- 至少指定 `app_id`/`title` 之一
+- 至少指定 `open_on_workspace`/`focus_command` 之一
+- `app_id`/`title` 可单独或列表形式，任一匹配即触发
+
+### 显示器匹配
+
+使用 `workspace@output` 格式将窗口移动到指定显示器上的工作区：
+
+```toml
+# 将 Firefox 移到 DP-1 显示器上的工作区 "2"
+[[window_rule]]
+app_id = "firefox"
+open_on_workspace = "2@DP-1"
+
+# 将 Chrome 移到 eDP-1 显示器上的工作区 "browser"
+[[window_rule]]
+app_id = "chrome"
+open_on_workspace = "browser@eDP-1"
+```
 
 > **窗口匹配**: 关于窗口匹配机制的详细说明，请参阅 [窗口匹配机制文档](../window_matching.md) 和 [插件系统通用配置说明](plugins.md#通用配置说明)
 
@@ -79,27 +94,45 @@ open_on_workspace = "browser"
 
 ## 工作原理
 
-插件监听 `WindowOpenedOrChanged` 事件：
+监听 `WindowOpened` 事件：
 
-1. 使用配置的正则表达式匹配窗口的 `app_id` 或 `title`
-2. 如果匹配，自动将窗口移动到指定的 workspace
-3. 规则按配置顺序检查，**第一个匹配的规则会被应用**
+1. 正则匹配窗口 `app_id`/`title`
+2. 匹配后自动移至指定 workspace
+3. 按配置顺序检查，**首条匹配规则生效**
+4. 如果 `open_on_workspace` 以 `!` 结尾，窗口将被锁定在该 workspace
+
+### Workspace 锁定
+
+在 `open_on_workspace` 末尾加 `!` 可将窗口锁定在指定 workspace，窗口无法被手动移走：
+
+```toml
+# 锁定到 workspace 1（eDP 显示器）
+[[window_rule]]
+app_id = "firefox"
+open_on_workspace = "1@eDP!"
+
+# 锁定到名为 "dev" 的 workspace
+[[window_rule]]
+app_id = "^code$"
+open_on_workspace = "dev!"
+```
+
+锁定的窗口在每次属性变化时会被检查，如果不在目标 workspace 则自动移回。
 
 ## 特性
 
-- ✅ **正则表达式**: 支持完整的正则表达式语法
-- ✅ **灵活匹配**: 支持 `app_id` 或 `title`，或两者组合（OR 逻辑）
-- ✅ **列表支持**: `app_id` 和 `title` 可以是模式列表，任意一个匹配即可触发规则
-- ✅ **正则缓存**: 编译后的正则表达式会被缓存，提高性能
-- ✅ **配置热更新**: 支持配置更新而不重启守护进程
+- ✅ 正则匹配（`app_id`/`title`，支持列表与 OR 逻辑）
+- ✅ 正则缓存，提升性能
+- ✅ 配置热更新，无需重启
+- ✅ Workspace 锁定（`!` 后缀），防止窗口被移走
 
-## focus_command_once 功能
+## focus_command_once
 
-`focus_command_once` 选项允许您对每个规则仅执行一次 `focus_command`，而不是对每个窗口都执行。请参阅 [issue #1](https://github.com/Asthestarsfalll/piri/issues/1)。
+规则级单次执行，非窗口级（[issue #1](https://github.com/Asthestarsfalll/piri/issues/1)）。
 
 ## 注意事项
 
-1. **规则顺序很重要**: 第一个匹配的规则会被应用，后续规则不会检查
-2. **Workspace 不存在**: 如果指定的 workspace 不存在，会记录警告但不会报错
-3. **正则表达式性能**: 建议使用简单明确的模式以获得更好性能
-4. **focus_command_once 是规则级别的**: 跟踪是按规则进行的，而不是按窗口进行的。一旦规则的 `focus_command` 已执行（当 `focus_command_once = true` 时），它将不会对匹配该规则的任何后续窗口再次执行
+1. **规则顺序**：首条匹配生效，后续不检查
+2. **Workspace 不存在**：记录警告，不报错
+3. **正则性能**：建议简单明确的模式
+4. **focus_command_once**：规则级跟踪，执行后不再触发

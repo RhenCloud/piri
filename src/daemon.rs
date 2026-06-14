@@ -41,7 +41,7 @@ async fn start_config_watcher(
         let _watcher = watcher;
         let mut debouncer = Debounce::new();
 
-        while let Some(_) = rx.recv().await {
+        while rx.recv().await.is_some() {
             let handler = handler.clone();
             let plugin_manager = plugin_manager.clone();
             let niri = niri.clone();
@@ -112,6 +112,19 @@ async fn run_daemon_loop(
             event_result = event_rx.recv() => {
                 match event_result {
                     Some(event) => {
+                        // Refresh outputs cache on events that may affect output state:
+                        // - WorkspacesChanged: workspace config changed, possibly due to output changes
+                        // - WorkspaceActivated: new output connected activates a workspace on it
+                        // - ConfigLoaded: config reload may change output settings
+                        if matches!(&event, niri_ipc::Event::WorkspacesChanged { .. } | niri_ipc::Event::WorkspaceActivated { .. } | niri_ipc::Event::ConfigLoaded { .. }) {
+                            let niri_refresh = niri.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = niri_refresh.refresh_outputs().await {
+                                    log::warn!("Failed to refresh outputs cache: {}", e);
+                                }
+                            });
+                        }
+
                         let pm = plugin_manager.clone();
                         let niri_clone = niri.clone();
                         tokio::spawn(async move {
@@ -175,6 +188,12 @@ async fn run_daemon(mut handler: CommandHandler) -> Result<()> {
     // Initialize plugin manager
     let config = handler.config().clone();
     let niri = handler.niri().clone();
+
+    // Initialize outputs cache at startup
+    if let Err(e) = niri.refresh_outputs().await {
+        warn!("Failed to initialize outputs cache: {}", e);
+    }
+
     let mut plugin_manager = PluginManager::new();
     if let Err(e) = plugin_manager.init(niri.clone(), &config).await {
         warn!("Failed to initialize plugins: {}", e);

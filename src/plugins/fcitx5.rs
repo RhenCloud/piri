@@ -1,6 +1,5 @@
 use anyhow::Result;
 use log::{debug, info, warn};
-use niri_ipc::Event;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{deserialize_string_or_vec, Config};
 use crate::niri::NiriIpc;
 use crate::plugins::window_utils::{self, WindowMatcher, WindowMatcherCache};
-use crate::plugins::FromConfig;
+use crate::plugins::{FromConfig, PiriEvent};
 use crate::utils::Throttle;
 
 /// Fcitx5 input mode
@@ -138,7 +137,7 @@ impl Fcitx5Plugin {
     /// Handle focus change for a window
     async fn handle_focus_change(&mut self, window_id: u64) -> Result<()> {
         // Check if this is a programmatic focus change (e.g., from auto_fill)
-        if window_utils::should_ignore_focus_change().await {
+        if window_utils::should_ignore_focus_change() {
             debug!(
                 "Ignoring programmatic focus change for window {}",
                 window_id
@@ -166,11 +165,10 @@ impl Fcitx5Plugin {
 
         let rules = self.config.rules.clone();
         for rule in rules.iter() {
-            let matcher = WindowMatcher::new(rule.app_id.clone(), rule.title.clone());
+            let matcher = WindowMatcher::new(rule.app_id.as_deref(), rule.title.as_deref());
             if self
                 .matcher_cache
-                .matches(window.app_id.as_ref(), Some(&window.title), &matcher)
-                .await?
+                .matches(window.app_id.as_ref(), Some(&window.title), &matcher)?
             {
                 // Parse input mode from rule
                 let target_mode = match rule.input_mode.to_lowercase().as_str() {
@@ -224,9 +222,9 @@ impl crate::plugins::Plugin for Fcitx5Plugin {
         }
     }
 
-    async fn handle_event(&mut self, event: &Event, _niri: &NiriIpc) -> Result<()> {
+    async fn handle_event(&mut self, event: &PiriEvent, _niri: &NiriIpc) -> Result<()> {
         match event {
-            Event::WindowFocusChanged { id: some_window_id } => {
+            PiriEvent::WindowFocusChanged { id: some_window_id } => {
                 if let Some(window_id) = some_window_id {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     self.handle_focus_change(*window_id).await?;
@@ -237,9 +235,9 @@ impl crate::plugins::Plugin for Fcitx5Plugin {
         Ok(())
     }
 
-    fn is_interested_in_event(&self, event: &Event) -> bool {
+    fn is_interested_in_event(&self, event: &PiriEvent) -> bool {
         match event {
-            Event::WindowFocusChanged { .. } => true,
+            PiriEvent::WindowFocusChanged { .. } => true,
             _ => false,
         }
     }
@@ -250,7 +248,7 @@ impl crate::plugins::Plugin for Fcitx5Plugin {
             config.rules.len()
         );
         self.config = config;
-        self.matcher_cache.clear_cache().await;
+        self.matcher_cache.clear_cache();
         Ok(())
     }
 }

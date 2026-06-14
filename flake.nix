@@ -35,10 +35,25 @@
             nativeBuildInputs = with pkgs; [
               pkg-config
             ];
+            buildInputs = with pkgs; [
+              wayland
+              cairo
+              glib
+            ];
           };
         in
         {
           packages.default = piri;
+          devShells.default = pkgs.mkShell {
+            inputsFrom = [ piri ];
+            packages = with pkgs; [
+              rustfmt
+              clippy
+              cargo-watch
+              rust-analyzer
+            ];
+            RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+          };
         }
       );
     in

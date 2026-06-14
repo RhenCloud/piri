@@ -1,14 +1,13 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use log::{debug, info, warn};
-use niri_ipc::Event;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::config::Config;
 use crate::niri::NiriIpc;
-use crate::plugins::{FromConfig, Plugin};
+use crate::plugins::{FromConfig, PiriEvent, Plugin};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SleepyConfig {
@@ -137,9 +136,9 @@ impl Plugin for SleepyPlugin {
         }
     }
 
-    async fn handle_event(&mut self, event: &Event, _niri: &NiriIpc) -> Result<()> {
+    async fn handle_event(&mut self, event: &PiriEvent, _niri: &NiriIpc) -> Result<()> {
         match event {
-            Event::WindowFocusChanged { id } => {
+            PiriEvent::WindowFocusChanged { id } => {
                 if let Some(window_id) = id {
                     if let Err(e) = self.handle_focus_change(*window_id).await {
                         warn!("Failed to update sleepy status: {}", e);
@@ -151,9 +150,9 @@ impl Plugin for SleepyPlugin {
         Ok(())
     }
 
-    fn is_interested_in_event(&self, event: &Event) -> bool {
+    fn is_interested_in_event(&self, event: &PiriEvent) -> bool {
         match event {
-            Event::WindowFocusChanged { .. } => true,
+            PiriEvent::WindowFocusChanged { .. } => true,
             _ => false,
         }
     }

@@ -21,10 +21,6 @@ jobs:
             os: ubuntu-22.04
             artifact_name: piri-x86_64-unknown-linux-gnu
             strip: true
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
-            artifact_name: piri-aarch64-unknown-linux-gnu
-            strip: true
 
     steps:
       - name: Checkout repository
@@ -48,33 +44,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-${{ matrix.target }}-
 
-      - name: Install cross-compilation dependencies
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          sudo apt-get install -y libc6-dev-arm64-cross
-          sudo apt-get install -y binutils-aarch64-linux-gnu
-
-      - name: Set up cross-compilation
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-
       - name: Build release binary
         run: |
           cargo build --release --target ${{ matrix.target }}
 
       - name: Strip binary
         if: matrix.strip
-        run: |
-          if [ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]; then
-            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/piri
-          else
-            strip target/${{ matrix.target }}/release/piri
-          fi
+        run: strip target/${{ matrix.target }}/release/piri
 
       - name: Create archive
         working-directory: ${{ github.workspace }}
@@ -151,4 +127,3 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(steps.tag.outputs.TAG_NAME, '-') }}
-

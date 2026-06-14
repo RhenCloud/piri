@@ -119,7 +119,7 @@ window-rule {
 
 ### 基于 PID 的匹配示例
 
-![Swallow - 基于 PID 的匹配](./assets/swallow_pid.mp4)
+https://github.com/user-attachments/assets/51567d89-8ca8-4f4a-b2ca-732dfc0741c9
 
 使用默认的 PID 匹配（`use_pid_matching = true`），插件会自动追踪进程树来查找父子关系。
 
@@ -134,7 +134,7 @@ child_app_id = [".*mpv.*"]
 
 ### 基于规则的匹配示例
 
-![Swallow - 基于规则的匹配](./assets/swallow_rule.mp4)
+https://github.com/user-attachments/assets/9968e97f-fdea-4211-a007-717edf703e93
 
 使用 `app_id` 和 `title` 模式来匹配父窗口。
 
@@ -262,4 +262,3 @@ child_app_id = ["mpv", "imv", "feh", "sxiv"]
 - 进程树追踪会一直向上追踪到 PID 1，如果进程树很深可能会影响性能
 - PID 匹配要求进程具有父子关系
 - 聚焦窗口队列最多维护 5 个窗口，如果父窗口不在最近 5 个聚焦的窗口中，基于规则的匹配可能无法找到父窗口
-
