@@ -15,7 +15,7 @@ use crate::utils::Throttle;
 /// Fcitx5 input mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fcitx5InputMode {
-    /// English mode (active = 0)
+    /// English mode (inactive = 1)
     English,
     /// Chinese mode (active = 2)
     Chinese,
@@ -23,19 +23,12 @@ pub enum Fcitx5InputMode {
 
 impl Fcitx5InputMode {
     /// Convert from fcitx5-remote status code
+    /// fcitx5-remote: 0=closed, 1=inactive(English), 2=active(Chinese)
     pub fn from_status(status: i32) -> Option<Self> {
         match status {
-            0 => Some(Fcitx5InputMode::English),
+            0 | 1 => Some(Fcitx5InputMode::English),
             2 => Some(Fcitx5InputMode::Chinese),
             _ => None,
-        }
-    }
-
-    /// Get the fcitx5-remote status code for this mode
-    pub fn to_status(&self) -> i32 {
-        match self {
-            Fcitx5InputMode::English => 0,
-            Fcitx5InputMode::Chinese => 2,
         }
     }
 }
@@ -116,9 +109,12 @@ impl Fcitx5Plugin {
 
     /// Set fcitx5 input mode
     fn set_input_mode(mode: Fcitx5InputMode) -> Result<()> {
-        let status = mode.to_status();
+        let arg = match mode {
+            Fcitx5InputMode::English => "-c",
+            Fcitx5InputMode::Chinese => "-o",
+        };
         let output = Command::new("fcitx5-remote")
-            .arg(status.to_string())
+            .arg(arg)
             .output()
             .map_err(|e| anyhow::anyhow!("Failed to execute fcitx5-remote: {}", e))?;
 
