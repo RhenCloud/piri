@@ -278,6 +278,14 @@ secret = ""
 # If true, use app_id as status text first; otherwise use window title
 prefer_app_id = false
 
+# Optional: MPRIS media playback reporting using a separate device
+# media_process_name is a regex matching the MPRIS player process/bus name,
+# e.g. "spotify|vlc|firefox"
+# media_process_name = "spotify|vlc"
+# media_device_id = "my-linux-media"
+# media_device_name = "Media Player"
+# media_poll_interval = 5  # seconds, how often to poll playback status
+
 # --- Monitor-scoped examples ---
 #
 # Exact match: applies to a specific monitor
